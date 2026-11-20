@@ -2,15 +2,15 @@
 
 // macOS system layer for the kkrieger player (replaces _start.cpp).
 //
-// Stage 1: no window and no GPU yet. Everything the game needs to load its
-// data and generate all content is implemented: files, time, fonts
-// (CoreText instead of GDI), textures (kept in memory, converted to 8 bit
-// exactly like the D3D version), geometry buffers and material setups.
-// Drawing calls are accepted and counted.
+// Window and input use AppKit, sound is in sound_mac.mm. Files, time, fonts
+// (CoreText instead of GDI), textures (converted to 8 bit exactly like the
+// D3D version), geometry buffers and material setups are implemented here.
+// Drawing is not implemented yet: calls are accepted and counted.
 //
-//   kkrieger file.kx [--dump-textures dir] [--frames n]
+//   kkrieger file.kx [--fullscreen] [--headless] [--frames n]
+//                    [--press-enter] [--dump-textures dir]
 
-#import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 #import <CoreText/CoreText.h>
 #import <CoreGraphics/CoreGraphics.h>
 #include <time.h>
@@ -42,8 +42,17 @@ static const sInt IntroScreenY = 600;
 
 static sChar *CmdLineFile = (sChar *)"";
 static const char *DumpDir = 0;
-static sInt FrameCount = 1;
-static sBool PressEnter = sFALSE;           // test: press enter every 0.5 s, 60 fps pacing
+static sInt FrameCount = 0;                 // 0: run until quit
+static sBool PressEnter = sFALSE;           // test: press enter every 0.5 s
+static sBool Headless = sFALSE;             // test: no window, no sound
+static sBool Fullscreen = sFALSE;
+static sBool Quit = sFALSE;
+static NSWindow *Window;
+static sBool MouseCaptured = sFALSE;
+static sF64 MouseDX,MouseDY;                // accumulated relative mouse motion
+
+void MacSoundInit();
+void MacSoundExit();
 static sU64 StartTimeNs;
 
 // per-texture data that does not fit into sHardTex (which has a D3D pointer)
@@ -84,6 +93,10 @@ static void ParseArgs(int argc,char **argv)
       DumpDir = argv[++i];
     else if(!strcmp(argv[i],"--press-enter"))
       PressEnter = sTRUE;
+    else if(!strcmp(argv[i],"--headless"))
+      Headless = sTRUE;
+    else if(!strcmp(argv[i],"--fullscreen"))
+      Fullscreen = sTRUE;
     else if(!strcmp(argv[i],"--frames") && i+1<argc)
       FrameCount = atoi(argv[++i]);
     else if(argv[i][0]!='-')
@@ -105,64 +118,25 @@ int main(int argc,char **argv)
   return 0;
 }
 
-void sSystem_::InitX()
+static void DumpTextures()
 {
-  ConfigFlags = sSF_DIRECT3D;
-  ConfigX = IntroScreenX;
-  ConfigY = IntroScreenY;
-  sSetRndSeed(GetTime()&0x7fffffff);
-
-  WScreenCount = 1;
-  for(sInt i=0;i<MAX_TEXTURE;i++)
-    Textures[i].Flags = 0;
-  MtrlClearCaches();
-  InitScreens();
-
-  if(!sAppHandler(sAPPCODE_CONFIG,0))
-    return;
-
-  sInt t0 = GetTime();
-  sAppHandler(sAPPCODE_INIT,0);
-  sInt t1 = GetTime();
-  fprintf(stderr,"init: %d ms\n",t1-t0);
-
-  for(sInt i=0;i<KeyIndex;i++)
-    sAppHandler(sAPPCODE_KEY,KeyBuffer[i]);
-  KeyIndex = 0;
-
-  for(sInt f=0;f<FrameCount;f++)
-  {
-    DrawCalls = 0;
-    StateChanges = 0;
-    if(PressEnter)
-    {
-      usleep(16000);
-      if(f%30==0)  sAppHandler(sAPPCODE_KEY,sKEY_ENTER);
-      if(f%30==5)  sAppHandler(sAPPCODE_KEY,sKEY_ENTER|sKEYQ_BREAK);
-    }
-    Render();
-    if(!PressEnter || f%60==0)
-      fprintf(stderr,"frame %d: %d draw calls, %d state changes\n",f,DrawCalls,StateChanges);
-  }
-
   sInt live = 0, bytes = 0;
   for(sInt i=0;i<MAX_TEXTURE;i++)
   {
-    if(Textures[i].Flags)
+    if(sSystem->Textures[i].Flags)
     {
       live++;
-      bytes += Textures[i].XSize*Textures[i].YSize*4;
+      bytes += sSystem->Textures[i].XSize*sSystem->Textures[i].YSize*4;
     }
   }
   fprintf(stderr,"textures: %d alive, %d KB (top level)\n",live,bytes/1024);
 
-  if(DumpDir)
   {
     mkdir(DumpDir,0755);
     sInt n = 0;
     for(sInt i=0;i<MAX_TEXTURE;i++)
     {
-      sHardTex *tex = &Textures[i];
+      sHardTex *tex = &sSystem->Textures[i];
       if(!tex->Flags || !MacTextures[i].Level0)
         continue;
       char name[1024];
@@ -186,6 +160,212 @@ void sSystem_::InitX()
   }
 }
 
+/****************************************************************************/
+
+// macOS virtual key codes (kVK_*) to the codes of the Windows version:
+// letters and digits as 'A'..'Z' / '0'..'9', some keys as sKEY_*.
+static sInt MapKey(unsigned short kc)
+{
+  static const char letters[0x30] =             // kVK_ANSI_* 0x00..0x2f
+  {
+    'A','S','D','F','H','G','Z','X','C','V', 0 ,'B','Q','W','E','R',
+    'Y','T','1','2','3','4','6','5', 0 ,'9','7', 0 ,'8','0', 0 ,'O',
+    'U', 0 ,'I','P', 0 ,'L','J', 0 ,'K', 0 , 0 , 0 , 0 ,'N','M', 0 ,
+  };
+  switch(kc)
+  {
+  case 0x24: case 0x4c: return sKEY_ENTER;      // return, keypad enter
+  case 0x35: return sKEY_ESCAPE;
+  case 0x31: return sKEY_SPACE;
+  case 0x30: return sKEY_TAB;
+  case 0x33: return sKEY_BACKSPACE;
+  case 0x7b: return sKEY_LEFT;
+  case 0x7c: return sKEY_RIGHT;
+  case 0x7d: return sKEY_DOWN;
+  case 0x7e: return sKEY_UP;
+  }
+  return kc<0x30 ? letters[kc] : 0;
+}
+
+static void AddKey(sU32 key)
+{
+  if(sSystem->KeyIndex < MAX_KEYBUFFER)
+    sSystem->KeyBuffer[sSystem->KeyIndex++] = key;
+}
+
+static void CaptureMouse(sBool on)
+{
+  if(on==MouseCaptured || Headless)
+    return;
+  MouseCaptured = on;
+  CGAssociateMouseAndMouseCursorPosition(on ? false : true);
+  if(on) [NSCursor hide]; else [NSCursor unhide];
+}
+
+// handle all pending events, like the message pump of the Windows version
+static void PumpEvents()
+{
+  if(Headless)
+    return;
+  @autoreleasepool
+  {
+    NSEvent *ev;
+    while((ev = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]))
+    {
+      switch(ev.type)
+      {
+      case NSEventTypeKeyDown:
+      case NSEventTypeKeyUp:
+        if(ev.modifierFlags & NSEventModifierFlagCommand)
+          break;                            // menu shortcuts (cmd-q, cmd-f)
+        if(sInt key = MapKey(ev.keyCode))
+          AddKey(ev.type==NSEventTypeKeyUp ? key|sKEYQ_BREAK : key);
+        continue;                           // keys are ours: no system beep
+      case NSEventTypeLeftMouseDown:
+        if(!MouseCaptured && ev.window==Window)
+        {
+          CaptureMouse(sTRUE);              // the first click only captures the mouse
+          break;
+        }
+        sSystem->MouseButtons |= 1;
+        AddKey(sKEY_MOUSEL);
+        break;
+      case NSEventTypeLeftMouseUp:
+        if(sSystem->MouseButtons & 1)
+        {
+          sSystem->MouseButtons &= ~1;
+          AddKey(sKEY_MOUSEL|sKEYQ_BREAK);
+        }
+        break;
+      case NSEventTypeMouseMoved:
+      case NSEventTypeLeftMouseDragged:
+      case NSEventTypeRightMouseDragged:
+        if(MouseCaptured)
+        {
+          MouseDX += ev.deltaX;
+          MouseDY += ev.deltaY;
+        }
+        break;
+      default:
+        break;
+      }
+      [NSApp sendEvent:ev];
+    }
+  }
+}
+
+@interface KKAppDelegate : NSObject <NSApplicationDelegate,NSWindowDelegate>
+@end
+@implementation KKAppDelegate
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app { Quit = sTRUE; return NSTerminateCancel; }
+- (BOOL)windowShouldClose:(NSWindow *)sender { Quit = sTRUE; return NO; }
+- (void)windowDidResignKey:(NSNotification *)n { CaptureMouse(sFALSE); }
+@end
+
+static void CreateAppWindow()
+{
+  static KKAppDelegate *delegate;
+
+  [NSApplication sharedApplication];
+  [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+  delegate = [KKAppDelegate new];
+  NSApp.delegate = delegate;
+
+  NSMenu *bar = [NSMenu new];
+  NSMenuItem *appItem = [NSMenuItem new];
+  [bar addItem:appItem];
+  NSMenu *appMenu = [NSMenu new];
+  [appMenu addItemWithTitle:@"Toggle Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"];
+  [appMenu addItemWithTitle:@"Quit .kkrieger" action:@selector(terminate:) keyEquivalent:@"q"];
+  appItem.submenu = appMenu;
+  NSApp.mainMenu = bar;
+
+  NSRect r = NSMakeRect(0,0,sSystem->ConfigX,sSystem->ConfigY);
+  Window = [[NSWindow alloc] initWithContentRect:r
+    styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable
+    backing:NSBackingStoreBuffered defer:NO];
+  Window.title = @".kkrieger";
+  Window.contentAspectRatio = r.size;
+  Window.acceptsMouseMovedEvents = YES;
+  Window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
+  Window.delegate = delegate;
+  NSView *view = [[NSView alloc] initWithFrame:r];
+  view.wantsLayer = YES;
+  view.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+  Window.contentView = view;
+  [Window center];
+  [Window makeKeyAndOrderFront:nil];
+  [NSApp finishLaunching];
+  [NSApp activateIgnoringOtherApps:YES];
+  if(Fullscreen)
+    [Window toggleFullScreen:nil];
+  PumpEvents();
+}
+
+void sSystem_::InitX()
+{
+  ConfigFlags = sSF_DIRECT3D;
+  ConfigX = IntroScreenX;
+  ConfigY = IntroScreenY;
+  sSetRndSeed(GetTime()&0x7fffffff);
+
+  WScreenCount = 1;
+  for(sInt i=0;i<MAX_TEXTURE;i++)
+    Textures[i].Flags = 0;
+  MtrlClearCaches();
+  InitScreens();
+
+  if(!sAppHandler(sAPPCODE_CONFIG,0))
+    return;
+
+  if(!Headless)
+    CreateAppWindow();
+
+  sInt t0 = GetTime();
+  sAppHandler(sAPPCODE_INIT,0);
+  fprintf(stderr,"init: %d ms\n",GetTime()-t0);
+
+  if(!Headless)
+    MacSoundInit();
+
+  sInt lastFrameTime = GetTime();
+  for(sInt f=0;!Quit && (FrameCount<=0 || f<FrameCount);f++)
+  {
+    PumpEvents();
+    if(PressEnter)
+    {
+      if(f%30==0)  AddKey(sKEY_ENTER);
+      if(f%30==5)  AddKey(sKEY_ENTER|sKEYQ_BREAK);
+    }
+    for(sInt i=0;i<KeyIndex;i++)
+      sAppHandler(sAPPCODE_KEY,KeyBuffer[i]);
+    KeyIndex = 0;
+
+    DrawCalls = 0;
+    StateChanges = 0;
+    Render();
+    if(Headless && (!PressEnter || f%60==0))
+      fprintf(stderr,"frame %d: %d draw calls, %d state changes\n",f,DrawCalls,StateChanges);
+
+    // ~60 fps until the renderer paces frames with the display
+    if(!Headless || PressEnter)
+    {
+      sInt wait = lastFrameTime + 16 - GetTime();
+      if(wait>0) usleep(wait*1000);
+      lastFrameTime = GetTime();
+    }
+  }
+
+  if(!Headless)
+  {
+    CaptureMouse(sFALSE);
+    MacSoundExit();
+  }
+
+  if(DumpDir)
+    DumpTextures();
+}
+
 void sSystem_::InitScreens()
 {
   Screen[0].XSize = ConfigX;
@@ -206,6 +386,7 @@ void sSystem_::Render()
 
 void sSystem_::Exit()
 {
+  Quit = sTRUE;
 }
 
 /*sNORETURN*/ void sSystem_::Abort(sChar *msg)
@@ -238,7 +419,11 @@ void sSystem_::Progress(sInt done,sInt max)
   if(time > lasttime+450 || done==max)
   {
     lasttime = time;
-    fprintf(stderr,"progress: %d/%d\n",done,max);
+    if(Headless)
+      fprintf(stderr,"progress: %d/%d\n",done,max);
+    PumpEvents();
+    if(Quit)
+      exit(0);
   }
 }
 
@@ -264,43 +449,23 @@ sU8 *sSystem_::LoadFile(const sChar *name)
 }
 
 /****************************************************************************/
-/***                                                                      ***/
-/***   Input and sound (stage 1: silent, no input)                        ***/
-/***                                                                      ***/
-/****************************************************************************/
 
+// the Windows version moved the cursor back to the window center on every
+// call and returned the accumulated motion as an absolute position
 void sSystem_::GetInput(sInt id,sInputData &data)
 {
+  static sF64 x,y;
+  CaptureMouse(Window.isKeyWindow);
+  x += MouseDX;
+  y += MouseDY;
+  MouseDX = MouseDY = 0;
   sSetMem(&data,0,sizeof(data));
   data.Type = sIDT_MOUSE;
   data.AnalogCount = 3;
   data.DigitalCount = 3;
-}
-
-void sSystem_::SetSoundHandler(sSoundHandler hnd,sInt align,void *user)
-{
-}
-
-sInt sSystem_::SampleAdd(sS16 *data,sInt size,sInt buffers,sInt handle,sBool is3d)
-{
-  return handle;
-}
-
-sInt sSystem_::SamplePlay(sInt handle,sF32 volume,sF32 pan,sInt freq)
-{
-  return 0;
-}
-
-void sSystem_::Sample3DParam(sInt handle,sInt buffer,const sVector &pos,const sVector &vel,sF32 minDist,sF32 maxDist)
-{
-}
-
-void sSystem_::Sample3DListener(const sVector &pos,const sVector &vel,const sVector &up,const sVector &fwd,sF32 doppler,sF32 rolloff)
-{
-}
-
-void sSystem_::Sample3DCommit()
-{
+  data.Analog[0] = (sInt) x;
+  data.Analog[1] = (sInt) y;
+  data.Digital = MouseButtons;
 }
 
 /****************************************************************************/

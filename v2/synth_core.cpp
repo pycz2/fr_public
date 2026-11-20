@@ -2683,7 +2683,7 @@ struct V2Synth
     // Ahem, so this is somewhat dubious, but we don't use
     // virtual functions or anything so it should be fine. Ahem.
     // Look away please :)
-    memset(this, 0, sizeof(this));
+    memset(this, 0, sizeof(*this));          // was sizeof(this): cleared only a pointer's worth
 
     // set sampling rate
     this->samplerate = samplerate;
