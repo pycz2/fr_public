@@ -12,6 +12,27 @@
 #define RONAN
 #define V2MPLAYER_SYNC_FUNCTIONS
 
+#if sMAC
+
+// on macOS the music is played by the C++ version of the V2 synth (../v2)
+// through macos/v2bridge.cpp. same interface as the original player.
+class CV2MPlayer
+{
+public:
+	CV2MPlayer();
+	explicit CV2MPlayer(sU32 a_tickspersec);
+	~CV2MPlayer();
+	sBool Open (const void *a_v2mptr, sU32 a_samplerate=44100);
+	void  Close ();
+	void  Play (sU32 a_time=0);
+	void  Stop (sU32 a_fadetime=0);
+	sBool Render (sF32 *a_buffer, sU32 a_len);
+	sU32  GetTime();
+private:
+	void *Impl;
+};
+
+#else
 class CV2MPlayer
 {
 public:
@@ -211,6 +232,8 @@ private:
 	void  Reset();                      // resets player, inits synth
 	void  Tick();                       // one midi player tick
 };
+
+#endif // sMAC
 
 /****************************************************************************/
 /****************************************************************************/

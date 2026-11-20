@@ -2720,6 +2720,7 @@ void GenMesh::Perlin(const sMatrix &mat,const sVector &amp)
   sInt oldcw;
 
   // setup fpu: single precision, round towards neg. infinity
+#if !sMAC
   __asm
   {
     fstcw   [oldcw];
@@ -2727,6 +2728,7 @@ void GenMesh::Perlin(const sMatrix &mat,const sVector &amp)
     fldcw   [esp];
     pop     eax;
   }
+#endif
 
 	for(sInt i=0;i<Vert.Count;i++)
 	{
@@ -2741,7 +2743,11 @@ void GenMesh::Perlin(const sMatrix &mat,const sVector &amp)
       t0.Rotate34(mat,*vert);
       for(sInt j=0;j<3;j++)
       {
+#if sMAC
+        is[j] = (sInt) floorf(t0[j]); // integer coordinate (fpu rounds to -inf above)
+#else
         is[j] = sFtol(t0[j]);   // integer coordinate
+#endif
         fs[j] = t0[j] - is[j];  // fractional part
         is[j] &= 255;           // integer grid wraps round 256
         fs[j] = fs[j]*fs[j]*fs[j]*(10.0f+fs[j]*(6.0f*fs[j]-15.0f));
@@ -2773,10 +2779,12 @@ void GenMesh::Perlin(const sMatrix &mat,const sVector &amp)
 	}
 
   // restore fpu state
+#if !sMAC
   __asm
   {
     fldcw   [oldcw];
   }
+#endif
 }
 
 /****************************************************************************/
@@ -3118,7 +3126,8 @@ GenMesh * __stdcall Mesh_Cube(sInt tx,sInt ty,sInt tz,sInt flags,sFSRT srt)
     mat.Init();
     (&mat.l.x)[j] = 1.0f;
 
-    for(i=1;i<(&tx)[j];i++)
+    const sInt tess[3] = { tx,ty,tz };   // was (&tx)[j]
+    for(i=1;i<tess[j];i++)
     {
       mesh->Extrude(0x00010000,0x00000100);
       mesh->Face2Vert();
@@ -3987,8 +3996,14 @@ GenMesh * __stdcall Mesh_Perlin(KOp *upd,GenMesh *mesh,sInt mask,sFSRT srt,sF323
 
 /****************************************************************************/
 
+#if sMAC
+GenMesh * __stdcall Mesh_Add(sInt count,GenMesh **meshlist)
+{
+  GenMesh *&mesh = meshlist[0];   // (&mesh)[i] walks the input list
+#else
 GenMesh * __stdcall Mesh_Add(sInt count,GenMesh *mesh,...)
 {
+#endif
   sInt i;
   GenMesh *other;
 

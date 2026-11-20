@@ -243,7 +243,12 @@ static inline sF32 lerp(sF32 a, sF32 b, sF32 t)
 // DEBUG
 #include <stdarg.h>
 #include <stdio.h>
+#ifdef _MSC_VER
 extern "C" void __stdcall OutputDebugStringA(const char *what);
+#else
+static void OutputDebugStringA(const char *what) { fputs(what,stderr); }
+#define vsprintf_s(buf,fmt,arg) vsnprintf(buf,sizeof(buf),fmt,arg)
+#endif
 static void dprintf(const char *fmt, ...)
 {
   char buf[256];

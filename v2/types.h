@@ -9,6 +9,7 @@ typedef unsigned int      sUInt;
 typedef sInt              sBool;
 typedef char              sChar;
 
+#ifdef _MSC_VER
 typedef signed   char     sS8;
 typedef signed   short    sS16;
 typedef signed   long     sS32;
@@ -18,6 +19,20 @@ typedef unsigned char     sU8;
 typedef unsigned short    sU16;
 typedef unsigned long     sU32;
 typedef unsigned __int64  sU64;
+#else                     // LP64 (macOS, Linux): long is 64 bit there
+typedef signed   char     sS8;
+typedef signed   short    sS16;
+typedef signed   int      sS32;
+typedef signed   long long sS64;
+
+typedef unsigned char     sU8;
+typedef unsigned short    sU16;
+typedef unsigned int      sU32;
+typedef unsigned long long sU64;
+
+#define __stdcall
+#define __cdecl
+#endif
 
 typedef float             sF32;
 typedef double            sF64;

@@ -10,6 +10,11 @@
 #include "material20.hpp"
 #include "rtmanager.hpp"
 
+#if sMAC
+static GenMaterial *Material_Add(sInt count,GenMaterial *a,GenMaterial *b) { GenMaterial *l[2]={a,b}; return Material_Add(count,l); }
+#endif
+
+
 #define SCRIPTVERIFY(x) {if(!(x)) return 0;}
 #define REALMAT 1 // 1 for multipass texturing, 0 for fat shader
 
@@ -485,8 +490,14 @@ GenMesh * __stdcall Mesh_MatLink(GenMesh *mesh,GenMaterial *mtrl,sInt mask,sInt 
   return mesh;
 }
 
+#if sMAC
+GenMaterial * __stdcall Material_Add(sInt count,GenMaterial **m0list)
+{
+  GenMaterial *&m0 = m0list[0];   // (&m0)[i] walks the input list
+#else
 GenMaterial * __stdcall Material_Add(sInt count,GenMaterial *m0,...)
 {
+#endif
   sInt i,j;
   GenMaterial **mp,*mtrl,*madd;
   GenMaterialPass *pc;

@@ -3228,7 +3228,7 @@ void Engine_::BuildPaintJobs()
           continue;
 
         sInt jobId = meshMat->JobIds[j];
-        sInt materialId = sInt(pass) >> 3; // FIXME
+        sInt materialId = sInt(sDInt(pass) >> 3); // FIXME (only used as sort key)
         sInt matrixId = mesh->Jobs[jobId].AnimMatrix;
 
         if(matrixId == -1 || animBase == -1)

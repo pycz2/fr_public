@@ -43,7 +43,7 @@ sU32 sGetRnd()
 {
   sU32 i;
 
-#if sMOBILE
+#if sMOBILE || sMAC
   sU32 eax,ebx;
   eax = sRandomSeed;
   eax = eax*0x343fd+0x269ec3;
@@ -324,7 +324,14 @@ sF32 sRangeF32(sF32 a,sF32 b,sF32 c)
 */
 
 #if !sMOBILE
-#if sINTRO
+#if sINTRO && sMAC
+
+sF64 sFACos(sF64 f)         { return acos(f); }
+sF64 sFMod(sF64 a,sF64 b)   { return fmod(a,b); }
+sF64 sFPow(sF64 a,sF64 b)   { return a==0 ? 0 : pow(a,b); }   // asm version returned a for a==0
+sF64 sFExp(sF64 f)          { return exp(f); }
+
+#elif sINTRO
 
 
 
@@ -613,7 +620,7 @@ sInt sICosOld(sInt w)
 
 void sCopyMemFast(void *d,const void *s,sInt c)
 {
-#if !sINTRO && !sMOBILE
+#if !sINTRO && !sMOBILE && !sMAC
   if(sSystem->CpuMask & sCPU_MMX2)
   {
     __asm
@@ -1082,12 +1089,27 @@ sBool sScanCycle(const sChar *s,sInt index,sInt &start,sInt &len)
 /***                                                                      ***/
 /****************************************************************************/
 
-#if !sMOBILE
+#if sMAC
+extern "C" char *fcvt(double value,int count,int *dec,int *sign);   // still in libc, gone from the headers
+extern "C" char *ecvt(double value,int count,int *dec,int *sign);
+#define _fcvt fcvt
+#define _ecvt ecvt
+#elif !sMOBILE
 extern "C" char * __cdecl _fcvt( double value, int count, int *dec, int *sign );
 extern "C" char * __cdecl _ecvt( double value, int count, int *dec, int *sign );
 #endif
 
-sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
+#if sMAC
+#define sFARG(fp,arg)  va_arg(fp,int)
+#define sFARGF(fp,arg) va_arg(fp,double)
+#define sFARGP(fp,arg) va_arg(fp,sChar *)
+#else
+#define sFARG(fp,arg)  sVARARG(fp,arg)
+#define sFARGF(fp,arg) sVARARGF(fp,arg)
+#define sFARGP(fp,arg) ((sChar *)(sDInt)sVARARG(fp,arg))
+#endif
+
+sBool sFormatString(sChar *d,sInt left,const sChar *s,sFormatArgs fp)
 {
   sInt c;
   sInt field0;
@@ -1163,14 +1185,14 @@ sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
         if(c=='f' || c=='e')
         {
 #if !sMOBILE
-          fval = sVARARGF(fp,arg);arg+=2;
+          fval = sFARGF(fp,arg);arg+=2;
 #else
           arg+=2;
 #endif
         }
         else
         {
-          val = sVARARG(fp,arg);arg++;
+          val = sFARG(fp,arg);arg++;
         }
         if(c=='f')        // this is preliminary!!!!!!!
         {
@@ -1321,7 +1343,7 @@ sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
       }
       else if(c=='c')
       {
-        val = (sInt)sVARARG(fp,arg);arg++;
+        val = (sInt)sFARG(fp,arg);arg++;
         if(left>0)
         {
           *d++ = val;
@@ -1331,7 +1353,7 @@ sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
       }
       else if(c=='s')
       {
-        string = (sChar * )(sDInt)sVARARG(fp,arg);arg++;
+        string = sFARGP(fp,arg);arg++;
         len = sGetStringLen(string);
         if(field0<=len)
           field0=len;
@@ -1362,7 +1384,7 @@ sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
       }
       else if(c=='h' || c=='H') 
       {
-        val = sVARARG(fp,arg);arg++;
+        val = sFARG(fp,arg);arg++;
         if(c=='H')
         {
           if(sAbs(val)>=0x00010000)
@@ -1411,7 +1433,7 @@ sBool sFormatString(sChar *d,sInt left,const sChar *s,const sChar **fp)
 
 void __cdecl sSPrintF(sChar *buffer,sInt size,const sChar *format,...)
 {
-  sFormatString(buffer,size,format,&format);
+  sFORMAT_CALL(sFormatString(buffer,size,format,FA),format);
 }
 
 /****************************************************************************/
@@ -1889,6 +1911,12 @@ sBool sReadEnd(sU32 *&data)
 /***                                                                      ***/
 /****************************************************************************/
 
+#if sMAC
+#include <stdio.h>
+static void OutputDebugStringA(const char *s) { fputs(s,stderr); }
+static int wvsprintfA(char *b,const char *f,va_list a) { return vsnprintf(b,1024,f,a); }
+#endif
+
 #if sMOBILE
 
 void sTerminate(sChar *buffer);
@@ -1904,7 +1932,7 @@ void __cdecl sFatal(const sChar *format,...)
   static sChar buffer[1024];
 
 //  sFatality = 1;
-  sFormatString(buffer,sCOUNTOF(buffer),format,&format);
+  sFORMAT_CALL(sFormatString(buffer,sCOUNTOF(buffer),format,FA),format);
 
   sOutputDebugString(buffer);
   sOutputDebugString(sTXT("\n"));
@@ -1921,7 +1949,7 @@ void __cdecl sDPrintF(const sChar *format,...)
 {
   sChar buffer[1024];
 
-  sFormatString(buffer,sCOUNTOF(buffer),format,&format);
+  sFORMAT_CALL(sFormatString(buffer,sCOUNTOF(buffer),format,FA),format);
 
   sOutputDebugString(buffer);
 }  
@@ -1943,15 +1971,19 @@ void sVerifyFalse(const sChar *file,sInt line)
 #if !sINTRO || !sRELEASE
 
 extern sInt sFatality;
+#if !sMAC
 extern "C" void __stdcall OutputDebugStringA(char *string);
+#endif
+#if !sMAC
 extern "C" int __stdcall wvsprintfA(char *buffer,const char *fmt,va_list args);
+#endif
 
 void __cdecl sFatal(const sChar *format,...)
 {
   static sChar buffer[1024];
 
   sFatality = 1;
-  sFormatString(buffer,sCOUNTOF(buffer),format,&format);
+  sFORMAT_CALL(sFormatString(buffer,sCOUNTOF(buffer),format,FA),format);
 
 #if !sRELEASE
   OutputDebugStringA(buffer);
@@ -1964,7 +1996,9 @@ void __cdecl sFatal(const sChar *format,...)
 
 #else
 
+#if !sMAC
 extern "C" int __stdcall wvsprintfA(char *buffer,const char *fmt,va_list args);
+#endif
 
 void __cdecl sFatal(sChar *format,...)
 {
@@ -1996,7 +2030,7 @@ void __cdecl sDPrintF(const sChar *format,...)
   sChar buffer[1024];
 
 #if !sINTRO
-  sFormatString(buffer,sCOUNTOF(buffer),format,&format);
+  sFORMAT_CALL(sFormatString(buffer,sCOUNTOF(buffer),format,FA),format);
   sSystem->Log(buffer);
 #else
   va_list list;
@@ -3265,7 +3299,7 @@ void sFrustum::Normalize()
 
 void sSPrintF(const sStringDesc &desc,const sChar *format,...)
 {
-  sFormatString(desc.Buffer,desc.Size,format,&format);
+  sFORMAT_CALL(sFormatString(desc.Buffer,desc.Size,format,FA),format);
 }
 
 /****************************************************************************/
@@ -3735,10 +3769,10 @@ void sText::Print(const sChar *s)
 
 void sText::PrintF(const sChar *format,...)
 {
-  PrintArg(format,&format);
+  sFORMAT_CALL(PrintArg(format,FA),format);
 }
 
-void sText::PrintArg(const sChar *format,const sChar **fp)
+void sText::PrintArg(const sChar *format,sFormatArgs fp)
 {
   if(Alloc==0)
     Realloc(1024);

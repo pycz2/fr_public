@@ -185,7 +185,7 @@ sBool sAppHandler(sInt code,sDInt value)
     data = PtrTable[0];
 
 //#if !sINTRO
-    if(((sInt)data)==0x54525450)
+    if(((sDInt)data)==0x54525450)
     {
       data = sSystem->LoadFile(sSystem->GetCmdLine());
       if(data==0)
@@ -209,7 +209,10 @@ sBool sAppHandler(sInt code,sDInt value)
   case sAPPCODE_INIT:
     Document = new KDoc;
 
-    Document->Init(data);
+    {
+      const sU8 *dp = data;               // msvc bound a temporary here
+      Document->Init(dp);
+    }
     Environment = new KEnvironment;
     Sound = 0;
 

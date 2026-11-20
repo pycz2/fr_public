@@ -3,8 +3,12 @@
 #include "genbitmap.hpp"
 #include "rtmanager.hpp"
 #include "_start.hpp"
+#if sMAC
+#include "macos/mmx_emu.hpp"
+#else
 #include "mmintrin.h"
 #include "xmmintrin.h"
+#endif
 
 #define SCRIPTVERIFY(x) {if(!(x)) return 0;}
 #define SCRIPTVERIFYVOID(x) {return 0; }
@@ -150,6 +154,54 @@ sU32 GetColor32(const sInt4 &colx)
   return col;
 }
 
+#if sMAC
+
+// literal translations of the MMX code below (see macos/mmx_emu.hpp)
+
+void Fade64(sU64 &r,sU64 &c0,sU64 &c1,sInt fade)
+{
+  static const sU64 xor0 = 0xffffffff00000000;
+  static const sU64 add0 = 0x0000800100000000;
+  m64 mm0,mm1,mm2,mm3;
+
+  mm2 = m64q(c0);
+  mm3 = m64q(c1);
+  mm0 = movd(fade);
+  mm0 = punpckldq(mm0,mm0);
+  mm0 = psrad(mm0,1);
+  mm0 = pxor(mm0,m64q(xor0));
+  mm0 = paddd(mm0,m64q(add0));
+  mm0 = packssdw(mm0,mm0);
+  mm0 = punpcklwd(mm0,mm0);
+  mm1 = mm0;
+  mm0 = punpcklwd(mm0,mm0);
+  mm1 = punpckhwd(mm1,mm1);
+  mm3 = pmulhw(mm3,mm0);
+  mm2 = pmulhw(mm2,mm1);
+  mm2 = paddw(mm2,mm3);
+  mm2 = psllw(mm2,1);
+  r = mm2.q;
+}
+
+void AddScale64(sU64 &r,sU64 &c0,sU64 &c1,sInt fade)
+{
+  m64 mm0,mm2,mm3;
+
+  mm2 = m64q(c0);
+  mm3 = m64q(c1);
+  mm0 = movd(fade);
+  mm0 = psrad(mm0,1);
+  mm0 = packssdw(mm0,mm0);
+  mm0 = punpcklwd(mm0,mm0);
+  mm0 = punpcklwd(mm0,mm0);
+  mm3 = pmulhw(mm3,mm0);
+  mm3 = psllw(mm3,1);
+  mm2 = paddsw(mm2,mm3);
+  r = mm2.q;
+}
+
+#else
+
 void Fade64(sU64 &r,sU64 &c0,sU64 &c1,sInt fade)
 {
   static const sU64 xor0 = 0xffffffff00000000;
@@ -209,6 +261,8 @@ void AddScale64(sU64 &r,sU64 &c0,sU64 &c1,sInt fade)
   }
 }
 
+#endif
+
 void BilinearSetup(BilinearContext *ctx,sU64 *src,sInt w,sInt h,sInt b)
 {
   ctx->Src = src;
@@ -218,6 +272,66 @@ void BilinearSetup(BilinearContext *ctx,sU64 *src,sInt w,sInt h,sInt b)
   ctx->XAm = ((b&1) ? 0xffffffff : w-1) << 3;
   ctx->YAm = (b&2) ? 0xffffffff : h-1;
 }
+
+#if sMAC
+
+// clamp/wrap one coordinate exactly like the x86 code: 'a' is the wrapped
+// coordinate, 'neg' the value whose sign bit selects 0 or size1 on overflow.
+static __forceinline sU32 BilinearClamp(sU32 a,sU32 neg,sU32 am,sU32 size1)
+{
+  a &= am;
+  if(a > size1)
+    a = ((sS32)neg >> 31) & size1;
+  return a;
+}
+
+void BilinearFilter(BilinearContext *ctx,sU64 *r,sInt u,sInt v)
+{
+  static const sU64 adjust = 0x8000800080008000;
+  sU8 *src = (sU8 *) ctx->Src;
+  sU32 uu = u, vv = v;
+  sU32 y0 = (sU32)(v >> 16);
+  sU32 x0 = (sU32)(u >> 13);
+  sU8 *row0 = src + (BilinearClamp(y0,vv-0x80000000,ctx->YAm,ctx->YSize1) << ctx->XShift);
+  sU8 *row1 = src + (BilinearClamp(y0+1,y0+0x7fffffff,ctx->YAm,ctx->YSize1) << ctx->XShift);
+  sU32 o0 = BilinearClamp(x0,uu-0x80000000,ctx->XAm,ctx->XSize1);
+  sU32 o1 = BilinearClamp(x0+8,x0+0x7ffffff8,ctx->XAm,ctx->XSize1);
+  m64 mm0,mm1,mm2,mm3,mm4,mm5,mm6;
+
+  mm1 = movd(vv);
+  mm0 = movd(uu);
+  mm2 = m64ld(row0+o0);
+  mm4 = m64ld(row1+o0);
+  mm3 = m64ld(row0+o1);
+  mm5 = m64ld(row1+o1);
+
+  mm6 = m64q(adjust);
+  mm0 = punpcklwd(mm0,mm0);
+  mm1 = punpcklwd(mm1,mm1);
+  mm0 = punpcklwd(mm0,mm0);
+  mm1 = punpcklwd(mm1,mm1);
+  mm0 = psrlw(mm0,1);
+  mm1 = psrlw(mm1,1);
+
+  mm3 = psubw(mm3,mm2);
+  mm5 = psubw(mm5,mm4);
+  mm3 = pmulhw(mm3,mm0);
+  mm5 = pmulhw(mm5,mm0);
+  mm3 = psllw(mm3,1);
+  mm5 = psllw(mm5,1);
+  mm2 = paddw(mm2,mm3);
+  mm4 = paddw(mm4,mm5);
+
+  mm4 = psubw(mm4,mm2);
+  mm2 = paddw(mm2,mm6);
+  mm4 = pmulhw(mm4,mm1);
+  mm4 = psllw(mm4,1);
+  mm2 = paddw(mm2,mm4);
+  mm2 = psubusw(mm2,mm6);
+  *r = mm2.q;
+}
+
+#else
 
 void BilinearFilter(BilinearContext *ctx,sU64 *r,sInt u,sInt v)
 {
@@ -330,6 +444,8 @@ ok4:
   }
 }
 
+#endif
+
 static sInt GammaTable[1025];
 
 static sInt GetGamma(sInt value)
@@ -382,6 +498,209 @@ GenBitmap * __stdcall Bitmap_RenderTarget(sInt xs,sInt ys,sU32 format)
 }
 
 /****************************************************************************/
+
+#if sMAC
+
+// register-for-register translation of the MMX loop below. registers keep
+// their values between pixels, exactly like in the assembler version.
+void __stdcall Bitmap_Inner(sU64 *d,sU64 *s,sInt count,sInt mode,sU64 *x=0)
+{
+  m64 mm0,mm1,mm2,mm3,mm4,mm5,mm6,mm7,ones;
+  sInt i;
+
+  ones = m64q(~0ULL);
+  mm3 = psrlw(ones,1);                        // 0x7fff7fff7fff7fff
+  mm4 = psrlq(ones,16);                       // 0x0000ffffffffffff
+  mm5 = pxor(ones,mm4);                       // 0xffff000000000000
+  mm4 = psrlw(mm4,1);
+  mm5 = psrlw(mm5,1);
+  mm2 = m64q(s[0]);                           // data[0]
+  mm7 = psrlw(ones,2);                        // 0x3fff3fff3fff3fff
+  mm6 = m64q(0);
+  mm1 = m64q(0);
+  if(mode>=0x13)
+  {
+    mm7 = psubsw(m64q(s[1]),mm2);             // data[1]-data[0]
+    mm1 = m64q(0);
+    mode = 0x13;
+  }
+
+  for(i=0;i<count;i++)
+  {
+    switch(mode)
+    {
+    case 0x00:                                // add
+      mm0 = paddsw(m64q(x[i]),m64q(s[i]));
+      break;
+    case 0x01:                                // sub
+      mm0 = psubusw(m64q(x[i]),m64q(s[i]));
+      break;
+    case 0x02:                                // mul
+      mm0 = psllw(pmulhw(m64q(x[i]),m64q(s[i])),1);
+      break;
+    case 0x03:                                // diff
+      mm0 = psubw(m64q(x[i]),m64q(s[i]));
+      mm0 = paddw(mm0,mm3);
+      mm0 = psrlw(mm0,1);
+      break;
+    case 0x04:                                // alpha
+      mm0 = m64q(s[i]);
+      mm1 = m64q(x[i]);
+      mm6 = mm0;
+      mm7 = mm0;
+      mm6 = psrlq(mm6,16);
+      mm7 = psrlq(mm7,32);
+      mm0 = paddw(mm0,mm6);
+      mm7 = paddw(mm7,mm6);
+      mm0 = psrlw(mm0,1);
+      mm7 = psrlw(mm7,1);
+      mm0 = paddw(mm0,mm7);
+      mm1 = pand(mm1,mm4);
+      mm0 = psllq(mm0,47);
+      mm0 = pand(mm0,mm5);
+      mm0 = por(mm0,mm1);
+      break;
+    case 0x05:                                // mul color
+      mm0 = psllw(pmulhw(m64q(x[i]),mm2),1);
+      break;
+    case 0x06:                                // add color
+      mm0 = paddsw(m64q(x[i]),mm2);
+      break;
+    case 0x07:                                // sub color
+      mm0 = psubusw(m64q(x[i]),mm2);
+      break;
+    case 0x08:                                // gray color
+      mm0 = m64q(x[i]);
+      mm6 = mm0;
+      mm7 = mm0;
+      mm6 = psrlq(mm6,16);
+      mm7 = psrlq(mm7,32);
+      mm0 = paddw(mm0,mm6);
+      mm7 = paddw(mm7,mm6);
+      mm0 = psrlw(mm0,1);
+      mm7 = psrlw(mm7,1);
+      mm0 = paddw(mm0,mm7);
+      mm0 = psrlw(mm0,1);
+      mm0 = punpcklwd(mm0,mm0);
+      mm0 = punpcklwd(mm0,mm0);
+      mm0 = por(mm0,mm5);
+      break;
+    case 0x09:                                // invert color
+      mm0 = pxor(m64q(x[i]),mm3);
+      break;
+    case 0x0a:                                // scale color
+      mm0 = m64q(x[i]);
+      mm1 = mm0;
+      mm0 = pmullw(mm0,mm2);
+      mm1 = pmulhw(mm1,mm2);
+      mm6 = mm0;
+      mm0 = punpcklwd(mm0,mm1);
+      mm6 = punpckhwd(mm6,mm1);
+      mm0 = psrld(mm0,11);
+      mm6 = psrld(mm6,11);
+      mm0 = packssdw(mm0,mm6);
+      break;
+    case 0x0b:                                // merge
+      mm0 = m64q(d[i]);
+      mm4 = m64q(s[i]);
+      mm5 = m64q(x[i]);
+      mm1 = mm3;
+      mm1 = psubsw(mm1,mm0);
+      mm0 = pmulhw(mm0,mm4);
+      mm1 = pmulhw(mm1,mm5);
+      mm0 = paddsw(mm0,mm1);
+      mm0 = psllw(mm0,1);
+      break;
+    case 0x0c:                                // brightness
+      mm0 = m64q(s[i]);
+      mm1 = m64q(x[i]);
+      mm2 = mm0;
+      mm2 = pcmpgtw(mm2,mm7);
+      mm2 = psrlw(mm2,1);
+      mm0 = pxor(mm0,mm2);
+      mm1 = pxor(mm1,mm2);
+      mm0 = pmulhw(mm0,mm1);
+      mm0 = psllw(mm0,2);
+      mm0 = pxor(mm0,mm2);
+      break;
+    case 0x0d:                                // subr
+      mm0 = psubusw(m64q(s[i]),m64q(x[i]));
+      break;
+    case 0x0e:                                // mulmerge
+      mm0 = m64q(d[i]);
+      mm4 = m64q(s[i]);
+      mm5 = m64q(x[i]);
+      mm1 = mm3;
+      mm4 = pmulhw(mm4,mm5);
+      mm4 = psllw(mm4,1);
+      mm1 = psubsw(mm1,mm0);
+      mm0 = pmulhw(mm0,mm4);
+      mm1 = pmulhw(mm1,mm5);
+      mm0 = paddsw(mm0,mm1);
+      mm0 = psllw(mm0,1);
+      break;
+    case 0x0f:                                // sharpen
+      mm0 = m64q(x[i]);
+      mm3 = mm0;
+      mm0 = psubusw(mm0,m64q(d[i]));
+      mm1 = mm0;
+      mm0 = pmullw(mm0,mm2);
+      mm1 = pmulhw(mm1,mm2);
+      mm7 = mm0;
+      mm0 = punpcklwd(mm0,mm1);
+      mm7 = punpckhwd(mm7,mm1);
+      mm0 = psrad(mm0,11);
+      mm7 = psrad(mm7,11);
+      mm0 = packssdw(mm0,mm7);
+      mm0 = paddsw(mm0,mm3);
+      mm0 = pmaxsw(mm0,mm6);
+      break;
+    case 0x10:                                // hardlight
+      mm1 = m64q(s[i]);
+      mm0 = m64q(x[i]);
+      mm1 = psllw(mm1,1);
+      mm2 = mm1;
+      mm1 = pand(mm1,mm3);
+      mm2 = psraw(mm2,15);
+      mm4 = mm0;
+      mm0 = pmulhw(mm0,mm1);
+      mm0 = psllw(mm0,1);
+      mm1 = paddw(mm1,mm4);
+      mm0 = pxor(mm0,mm2);
+      mm1 = pand(mm1,mm2);
+      mm0 = paddw(mm0,mm1);
+      break;
+    case 0x11:                                // over
+      mm0 = m64q(x[i]);
+      mm1 = m64q(s[i]);
+      mm2 = mm1;
+      mm1 = psubsw(mm1,mm0);
+      mm2 = punpckhwd(mm2,mm2);
+      mm2 = punpckhwd(mm2,mm2);
+      mm1 = pmulhw(mm1,mm2);
+      mm1 = psllw(mm1,1);
+      mm0 = paddsw(mm0,mm1);
+      mm0 = pmaxsw(mm0,mm6);
+      break;
+    case 0x12:                                // addsmooth (screen)
+      mm0 = pxor(m64q(x[i]),mm3);
+      mm1 = pxor(m64q(s[i]),mm3);
+      mm0 = pmulhw(mm0,mm1);
+      mm0 = psllw(mm0,1);
+      mm0 = pxor(mm0,mm3);
+      break;
+    default:                                  // color range
+      mm0 = pmulhw(m64q(x[i]),mm7);
+      mm0 = psllw(mm0,1);
+      mm0 = paddsw(mm0,mm2);
+      mm0 = pmaxsw(mm0,mm1);
+      break;
+    }
+    d[i] = mm0.q;
+  }
+}
+
+#else
 
 void __stdcall Bitmap_Inner(sU64 *d,sU64 *s,sInt count,sInt mode,sU64 *x=0)
 {
@@ -722,9 +1041,20 @@ ende:
     emms
   }
 }
+#endif
 
+#if sMAC
+static GenBitmap *Bitmap_Merge(sInt mode,sInt count,GenBitmap *a,GenBitmap *b) { GenBitmap *l[2]={a,b}; return Bitmap_Merge(mode,count,l); }
+#endif
+
+#if sMAC
+GenBitmap * __stdcall Bitmap_Merge(sInt mode,sInt count,GenBitmap **b0list)
+{
+  GenBitmap *&b0 = b0list[0];   // (&b0)[i] walks the input list
+#else
 GenBitmap * __stdcall Bitmap_Merge(sInt mode,sInt count,GenBitmap *b0,...)
 {
+#endif
   sInt i;
   GenBitmap *bi,*in;
   SCRIPTVERIFY(b0);
@@ -1329,7 +1659,7 @@ GenBitmap * __stdcall Bitmap_Blur(GenBitmap *bm,sInt flags,sF32 sx,sF32 sy,sF32 
   }
   while(repeat--);
   
-  __asm { emms };
+  _mm_empty();
   sVERIFY(qq!=(sU16 *)bm->Data);
   delete[] qq;
 

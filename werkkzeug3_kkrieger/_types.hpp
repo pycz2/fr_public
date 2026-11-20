@@ -27,6 +27,14 @@
 #define sPLAT_PC      1
 #define sPLAT_PDA     2
 
+#if defined(__APPLE__)
+#define sMAC          1               // native macOS (arm64 / x86_64), clang
+#define __stdcall                     // x86 calling conventions mean nothing here
+#define __cdecl
+#else
+#define sMAC          0
+#endif
+
 #if _WIN32_WCE
 #define sPLATFORM     sPLAT_PDA
 #include "Cmnintrin.h"
@@ -79,7 +87,7 @@
 /****************************************************************************/
 
 //#if _DEBUG                          // fix memory management
-#if !sINTRO && sPLATFORM!=sPLAT_PDA
+#if !sINTRO && sPLATFORM!=sPLAT_PDA && !sMAC
 #define _MFC_OVERRIDES_NEW
 void *  __cdecl operator new(unsigned int);
 void *  __cdecl operator new(unsigned int,const char *,int);
@@ -88,7 +96,11 @@ inline void __cdecl operator delete(void *p, const char *, int s) { ::operator d
 #endif
 //#endif
 
+#if sMAC
+#define sNORETURN __attribute__((noreturn))
+#else
 #define sNORETURN __declspec(noreturn)  // use this for dead end funtions
+#endif
 
 /****************************************************************************/
 /***                                                                      ***/
@@ -210,17 +222,29 @@ class sBitmap;
 typedef unsigned char             sU8;      // for packed arrays
 typedef unsigned short            sU16;     // for packed arrays
 typedef unsigned int              sU32;     // for packed arrays and bitfields
+#if sMAC
+typedef unsigned long long        sU64;     // use as needed
+#else
 typedef unsigned __int64          sU64;     // use as needed
+#endif
 typedef signed char               sS8;      // for packed arrays
 typedef short                     sS16;     // for packed arrays
 typedef int                       sS32;     // for packed arrays
+#if sMAC
+typedef signed long long          sS64;     // use as needed
+#else
 typedef signed __int64            sS64;     // use as needed
+#endif
 #if !sMOBILE
 typedef float                     sF32;     // basic floatingpoint
 typedef double                    sF64;     // use as needed
 #endif
 typedef int                       sInt;     // use this most!
+#if sMAC
+typedef long                      sDInt;    // type for pointer diff (64 bit)
+#else
 typedef int __w64                 sDInt;    // type for pointer diff
+#endif
 #if sUNICODE
 typedef unsigned short            sChar;    // type for strings
 #else
@@ -265,7 +289,7 @@ template <class Type> __forceinline Type sMax(Type a,Type b)            {return 
 template <class Type> __forceinline Type sSign(Type a)                  {return (a==0) ? 0 : (a>0) ? 1 : -1;}
 template <class Type> __forceinline Type sRange(Type a,Type max,Type min) {return (a>=max) ? max : (a<=min) ? min : a;}
 template <class Type> __forceinline void sSwap(Type &a,Type &b)         {Type s; s=a; a=b; b=s;}
-template <class Type> __forceinline Type sAlign(Type a,sInt b)          {return (Type)((((sInt)a)+b-1)&(~(b-1)));}
+template <class Type> __forceinline Type sAlign(Type a,sInt b)          {return (Type)((((sDInt)a)+b-1)&(~(sDInt)(b-1)));}
 
 template <class Type> __forceinline Type sSquare(Type a)                {return a*a;}
 
@@ -296,6 +320,11 @@ __forceinline sF32 sFade(sF32 a,sF32 b,sF32 fade)												{return a+(b-a)*fad
 
 // integer
 
+#if sMAC
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#else
 typedef unsigned int size_t;
 
 extern "C"
@@ -309,6 +338,7 @@ extern "C"
 
 #pragma intrinsic (abs)                                       // int intrinsic
 #pragma intrinsic (memset,memcpy,memcmp,strlen)               // memory intrinsic
+#endif
 
 __forceinline sInt sAbs(sInt i)                                 { return abs(i); }
 __forceinline void sSetMem(sPtr dd,sInt s,sInt c)               { memset(dd,s,c); }
@@ -326,6 +356,7 @@ __forceinline sInt sGetStringLen(const sChar *s)                { for(sInt i=0;s
 
 #if !sMOBILE
 
+#if !sMAC
 extern "C"
 {
 
@@ -351,6 +382,7 @@ extern "C"
 
 #pragma intrinsic (atan,atan2,cos,exp,log,log10,sin,sqrt,tan,fabs) // true intrinsic
 #pragma intrinsic (acos,asin,cosh,fmod,pow,sinh,tanh)         // fake intrinsic
+#endif
 
 __forceinline sF64 sFATan(sF64 f)         { return atan(f); }
 __forceinline sF64 sFATan2(sF64 a,sF64 b) { return atan2(a,b); }
@@ -396,7 +428,7 @@ sInt sQuadraticRoots(const sF32 *coeffs,sF32 *roots);
 /***                                                                      ***/
 /****************************************************************************/
 
-#if !sMOBILE
+#if !sMOBILE && !sMAC
 
 #pragma warning (disable : 4035) 
 
@@ -536,6 +568,21 @@ sBool sNormalFloat(sF32 value);
 
 #else
 
+#if sMAC
+// x87 control word games are meaningless on arm64: floats are always IEEE
+// single precision with round-to-nearest-even, which is what sFloatFix() set.
+__forceinline void sFloatFix()    {}
+__forceinline void sFloatDouble() {}
+__forceinline void sFloatDen1()   {}
+__forceinline void sFloatDen0()   {}
+
+__forceinline sInt sFtol(const float f)     { return (sInt)lrintf(f); } // fistp: round to nearest
+__forceinline sF32 sFRound(const float f)   { return rintf(f); }        // frndint
+__forceinline void sFSinCos(const float x,sF32 &sine,sF32 &cosine) { sine=sinf(x); cosine=cosf(x); }
+
+sBool sNormalFloat(sF32 value);
+#endif
+
 __forceinline sInt sMulDiv(sInt var_a,sInt var_b,sInt var_c)
 {
   return (sS32)( ((sS64)var_a)*((sS64)var_b)/var_c );
@@ -614,7 +661,17 @@ sBool sScanCycle(const sChar *cycle,sInt index,sInt &start,sInt &len);
 
 void sCopyString(sChar *d,const sChar *s,sInt size);
 sInt sCmpString(const sChar *a,const sChar *b);
-sBool sFormatString(sChar *buffer,sInt size,const sChar *format,const sChar **fp); // return sFALSE if text is truncated!
+// printf-style argument access. the x86 code walked the stack directly
+// (&format+1), which does not work with the arm64 calling convention.
+#if sMAC
+#include <stdarg.h>
+typedef va_list sFormatArgs;
+#define sFORMAT_CALL(expr,format) { va_list FA; va_start(FA,format); expr; va_end(FA); }
+#else
+typedef const sChar **sFormatArgs;
+#define sFORMAT_CALL(expr,format) { sFormatArgs FA=&format; expr; }
+#endif
+sBool sFormatString(sChar *buffer,sInt size,const sChar *format,sFormatArgs fp); // return sFALSE if text is truncated!
 
 /****************************************************************************/
 /***                                                                      ***/
@@ -762,8 +819,13 @@ sNORETURN void __cdecl sFatal(char *format,...);
 #define sVERIFY(x) {if(!(x))sVerifyFalse(sTXT(__FILE__),__LINE__);}
 #define sVERIFYFALSE {sVerifyFalse(sTXT(__FILE__),__LINE__);}
 #else
+#if sMAC
+#define sVERIFY(x) {if(!(x)){__builtin_debugtrap();sVerifyFalse(sTXT(__FILE__),__LINE__);}}
+#define sVERIFYFALSE {__builtin_debugtrap();sVerifyFalse(sTXT(__FILE__),__LINE__);}
+#else
 #define sVERIFY(x) {if(!(x)){__asm { int 3 };sVerifyFalse(sTXT(__FILE__),__LINE__);}}
 #define sVERIFYFALSE {__asm{ int 3 };sVerifyFalse(sTXT(__FILE__),__LINE__);}
+#endif
 #endif
 #else
 #define sVERIFY(x) {;}
@@ -1688,7 +1750,7 @@ template <class Type> class sAutoPtr        // automatically delete ptr when goi
 public:
   sAutoPtr()                                { Ptr = 0; }
   sAutoPtr(Type *x) : Ptr(x)                {}
-  ~sAutoPtr()                               { delete Ptr }
+  ~sAutoPtr()                               { delete Ptr; }
   sAutoPtr(const sAutoPtr &x) : Ptr(x)      { x=0; }
   sAutoPtr & operator= (const sAutoPtr &x)  { delete Ptr; Ptr=x; x=0; }
 
@@ -1698,6 +1760,8 @@ public:
 template <class Type> class sArray2 : public sArray<Type> // add support for sFORALL() and constructor/destructor to sArray 
 {
 public:
+  using sArray<Type>::Init; using sArray<Type>::Exit; using sArray<Type>::Copy;
+  using sArray<Type>::Count; using sArray<Type>::Array;
   sArray2()                                 { Init(); }
   ~sArray2()                                { Exit(); }
   sArray2(const sArray2 &x)                 { Init(); Copy(x); }
@@ -1834,7 +1898,7 @@ public:
   void FixUsed();
   void Print(const sChar *);                 // these require correct Used-counter!
   void PrintF(const sChar *format,...);
-  void PrintArg(const sChar *format,const sChar **fp);
+  void PrintArg(const sChar *format,sFormatArgs fp);
 };
 
 #endif
@@ -1944,7 +2008,11 @@ class sTickTimer
   sU64 Total;
   sU64 LastStart;
 
+#if sMAC
+  static sU64 Tick()                  { return __builtin_readcyclecounter(); }
+#else
   static sU64 Tick()                  { __asm { rdtsc } }
+#endif
 
 public:
   sTickTimer()                        { Reset(); }

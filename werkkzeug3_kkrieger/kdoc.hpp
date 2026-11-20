@@ -384,19 +384,100 @@ public:
 
 /****************************************************************************/
 
+// Operator handlers are called with an array of parameter words (inputs,
+// links, data words, strings, splines...). On x86 this array was copied to
+// the stack by assembler code (CallCode). For other ABIs, KCallThunk keeps a
+// type-aware invoker generated from the handler's real signature.
+
+#if sMAC
+#include <utility>
+#include <type_traits>
+
+typedef sDInt KSlot;              // one parameter word, wide enough for a pointer
+
+template <class T> struct KArg    // plain data: ints, floats, sInt3, sF323...
+{
+  enum { Slots = (sizeof(T)+3)/4 };
+  static T Get(const KSlot *s)
+  {
+    sU32 w[Slots];
+    for(sInt i=0;i<Slots;i++) w[i] = (sU32) s[i];
+    T t; memcpy(&t,w,sizeof(T)); return t;
+  }
+};
+template <class T> struct KArg<T *>   // pointers use one full slot
+{
+  enum { Slots = 1 };
+  static T *Get(const KSlot *s) { return (T *) s[0]; }
+};
+template <class T> struct KArg<T **>  // variable input list: pointer to the slots themselves
+{
+  enum { Slots = 1 };
+  static T **Get(const KSlot *s) { return (T **) s; }
+};
+
+template <class... A> struct KArgOffsets
+{
+  static constexpr sInt Get(sInt n)
+  {
+    constexpr sInt size[] = { KArg<A>::Slots..., 0 };
+    sInt o = 0;
+    for(sInt i=0;i<n;i++) o += size[i];
+    return o;
+  }
+};
+
+template <class R,class... A,size_t... I>
+sDInt KInvokeIndexed(void *fn,const KSlot *s,std::index_sequence<I...>)
+{
+  R (*f)(A...) = (R (*)(A...)) fn;
+  if constexpr (std::is_void<R>::value)
+  {
+    f(KArg<A>::Get(s+KArgOffsets<A...>::Get(I))...);
+    return 0;
+  }
+  else
+    return (sDInt) f(KArg<A>::Get(s+KArgOffsets<A...>::Get(I))...);
+}
+
+template <class R,class... A>
+sDInt KInvoke(void *fn,const KSlot *s)
+{
+  return KInvokeIndexed<R,A...>(fn,s,std::index_sequence_for<A...>());
+}
+
+struct KCallThunk
+{
+  void *Fn;
+  sDInt (*Invoke)(void *fn,const KSlot *args);
+
+  KCallThunk() : Fn(0), Invoke(0) {}
+  KCallThunk(int) : Fn(0), Invoke(0) {}           // "0" terminates the handler table
+  template <class R,class... A> KCallThunk(R (*f)(A...)) : Fn((void *) f), Invoke(&KInvoke<R,A...>) {}
+  sDInt Call(const KSlot *args) const { return Invoke(Fn,args); }
+};
+
+typedef KCallThunk KHandlerPtr;
+#define KHANDLER_FN(h) ((h).Fn)
+#else
+typedef sU32 KSlot;
+typedef void *KHandlerPtr;
+#define KHANDLER_FN(h) (h)
+#endif
+
 struct KClass                     // Operator class
 {
   sU32 Convention;                // calling convention +flag 0x10000000 (varinputs)
   sChar *Packing;                 // packing string
-  void *InitHandler;              // initialize operator
-  void *ExecHandler;              // execute operator
+  KHandlerPtr InitHandler;              // initialize operator
+  KHandlerPtr ExecHandler;              // execute operator
 }; // =16 bytes
 
 struct KHandler                   // Operator handler
 {
   sInt Id;                        // operator id
-  void *InitHandler;              // initialize operator
-  void *ExecHandler;              // execute operator
+  KHandlerPtr InitHandler;              // initialize operator
+  KHandlerPtr ExecHandler;              // execute operator
 };
 
 extern KHandler KHandlers[];
@@ -417,8 +498,8 @@ struct KOp                        // Operator
   sInt CacheCount;                // on creation set to output-count, then reduced with each link
   sInt WheelSpeed;                // used only for spinning wheels in the gui...
   KEvent *FirstEvent;             // list of active events for this operator
-  void *InitHandler;              // the actual code
-  void *ExecHandler;              // the actual code
+  KHandlerPtr InitHandler;              // the actual code
+  KHandlerPtr ExecHandler;              // the actual code
   sInt CalcError;                 // could not calculate cache
   sU32 Convention;                // calling conventions for code
   sU32 ChangeMask;                // which inputs don't update the "change" bit?

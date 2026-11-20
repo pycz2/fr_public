@@ -448,7 +448,7 @@ void sShaderCompiler::Error(const sChar *name,...)
   {
     ErrorCount++;
     Errors->PrintF("%s(%d): ",FileName,ErrorLineNum);
-    Errors->PrintArg(name,&name);
+    sFORMAT_CALL(Errors->PrintArg(name,FA),name);
     Errors->Print("\n");
   }
   ErrorLine++;

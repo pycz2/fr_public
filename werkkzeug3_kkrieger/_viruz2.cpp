@@ -4,7 +4,32 @@
 
 #pragma lekktor(off)
 
-#if sLINK_VIRUZ2
+#if sMAC && sLINK_VIRUZ2
+
+#include "macos/v2bridge.h"
+
+CV2MPlayer::CV2MPlayer() : Impl(V2BridgeNew()) {}
+CV2MPlayer::CV2MPlayer(sU32 a_tickspersec) : Impl(V2BridgeNew()) {}
+CV2MPlayer::~CV2MPlayer() { V2BridgeDelete(Impl); }
+
+sBool CV2MPlayer::Open(const void *a_v2mptr, sU32 a_samplerate)
+{
+  return Impl && V2BridgeOpen(Impl,a_v2mptr,a_samplerate);
+}
+void CV2MPlayer::Close()                { if(Impl) V2BridgeClose(Impl); }
+void CV2MPlayer::Play(sU32 a_time)      { if(Impl) V2BridgePlay(Impl,a_time); }
+void CV2MPlayer::Stop(sU32 a_fadetime)  { if(Impl) V2BridgeStop(Impl,a_fadetime); }
+sU32 CV2MPlayer::GetTime()              { return 0; }
+
+sBool CV2MPlayer::Render(sF32 *a_buffer, sU32 a_len)
+{
+  if(!a_buffer) return sFALSE;
+  if(!Impl) { sSetMem(a_buffer,0,a_len*2*sizeof(sF32)); return sFALSE; }
+  V2BridgeRender(Impl,a_buffer,a_len);
+  return V2BridgeIsPlaying(Impl);
+}
+
+#elif sLINK_VIRUZ2
 
 extern "C"
 {

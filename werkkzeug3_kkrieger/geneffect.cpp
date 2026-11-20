@@ -12,7 +12,9 @@
 #include "_util.hpp"
 #include "_startdx.hpp"
 #include "fried/fried.hpp"
+#if !sMAC
 #include <xmmintrin.h>
+#endif
 
 extern sF32 GlobalFps;
 extern sBool IntroHighTexRes;

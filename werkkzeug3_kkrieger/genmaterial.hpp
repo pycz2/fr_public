@@ -41,7 +41,11 @@ public:
 GenMaterial * __stdcall Init_Material_Material(KOp *op);
 void __stdcall Exec_Material_Material(KOp *op,KEnvironment *kenv);
 GenMesh * __stdcall Mesh_MatLink(GenMesh *mesh,GenMaterial *mtrl,sInt mask,sInt pass);
+#if sMAC
+GenMaterial * __stdcall Material_Add(sInt count,GenMaterial **m0list);  // variable inputs: pointer to input list
+#else
 GenMaterial * __stdcall Material_Add(sInt count,GenMaterial *m0,...);
+#endif
 
 GenMaterial * __stdcall Init_Material_Material20(KOp *op);
 

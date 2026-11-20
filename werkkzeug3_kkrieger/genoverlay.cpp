@@ -893,8 +893,14 @@ GenIPP * __stdcall Init_IPP_Layer2D(GenIPP *in,GenMaterial *mtrl,sInt size,sF324
   return new GenIPP;
 }
 
+#if sMAC
+GenIPP * __stdcall Init_IPP_Select(sInt count,GenIPP **inlist)
+{
+  GenIPP *&in = inlist[0];   // (&in)[i] walks the input list
+#else
 GenIPP * __stdcall Init_IPP_Select(sInt count,GenIPP *in,...)
 {
+#endif
   GenIPP **inp;
   sInt i;
   inp = &in;

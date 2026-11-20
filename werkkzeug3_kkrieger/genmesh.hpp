@@ -469,7 +469,11 @@ GenMesh * __stdcall Mesh_ExtrudeNormal(KOp *,GenMesh *msh,sInt mask,sF32 distanc
 GenMesh * __stdcall Mesh_Displace(KOp *,GenMesh *msh,GenBitmap *bmp,sInt mask,sF323 ampli);
 GenMesh * __stdcall Mesh_Bevel(KOp *,GenMesh *msh,sInt mask,sF32 elev,sF32 pull,sInt mode);
 GenMesh * __stdcall Mesh_Perlin(KOp *,GenMesh *msh,sInt mask,sFSRT srt,sF323 ampl);
+#if sMAC
+GenMesh * __stdcall Mesh_Add(sInt count,GenMesh **meshlist);  // variable inputs: pointer to input list
+#else
 GenMesh * __stdcall Mesh_Add(sInt count,GenMesh *msh,...);
+#endif
 GenMesh * __stdcall Mesh_DeleteFaces(GenMesh *msh,sInt mask);
 GenMesh * __stdcall Mesh_BeginRecord(GenMesh *msh);
 GenMesh * __stdcall Mesh_SelectRandom(GenMesh *msh,sU32 dmask,sInt dmode,sU32 ratio,sInt seed);

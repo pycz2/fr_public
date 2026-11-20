@@ -19,7 +19,9 @@ KOp *KOpCurrent = 0;
 #define sUSE_TIME_OF_YEAR 1
 #define sOP_PERFORMANCE 0
 
-#if sUSE_TIME_OF_YEAR
+#if sUSE_TIME_OF_YEAR && sMAC
+#include <time.h>
+#elif sUSE_TIME_OF_YEAR
 struct SYSTEMTIME
 {
   sU16 wYear;
@@ -239,6 +241,14 @@ sInt KOp::Calc(KEnvironment *env,sInt flags)
 
 /****************************************************************************/
 
+#if sMAC
+
+#define CALLHANDLER(h,data,p) ((h).Call(data))
+
+#else
+
+#define CALLHANDLER(h,data,p) CallCode((sInt)(h),(sInt *)(data),(p))
+
 #pragma warning(disable : 4731)   // EPB CHANGED WARNING
 
 static sInt CallCode(sInt code,sInt *para,sInt count)
@@ -270,11 +280,13 @@ static sInt CallCode(sInt code,sInt *para,sInt count)
 
 #pragma warning(default : 4731)
 
+#endif
+
 /****************************************************************************/
 
 KObject *KOp::Call(KEnvironment *kenv)
 {
-  sU32 data[KK_MAXINPUT+128];
+  KSlot data[KK_MAXINPUT+128];
   sInt p,pNoPara;
   sInt i,max;
   KObject *o;
@@ -291,11 +303,11 @@ KObject *KOp::Call(KEnvironment *kenv)
 
   if(Convention&(OPC_KOP|OPC_ALTINIT))
   {
-    data[p++] = (sU32) this;
+    data[p++] = (KSlot) this;
   }
   if(Convention&OPC_KENV)
   {
-    data[p++] = (sU32) kenv;
+    data[p++] = (KSlot) kenv;
   }
 
   pNoPara = p;
@@ -313,7 +325,7 @@ KObject *KOp::Call(KEnvironment *kenv)
         error = 1;
       else
         o->AddRef();
-      data[p++] = (sU32) o;
+      data[p++] = (KSlot) o;
     }
     else
     {
@@ -328,14 +340,14 @@ KObject *KOp::Call(KEnvironment *kenv)
   {
     if(Convention & OPC_DONTCALLLINK)
     {
-      data[p++] = (sU32) Link[i];
+      data[p++] = (KSlot) Link[i];
     }
     else
     {
       o = (Link[i] ? Link[i]->Cache : 0);
       if(o)
         o->AddRef();
-      data[p++] = (sU32) o;
+      data[p++] = (KSlot) o;
     }
   }
 
@@ -349,13 +361,13 @@ KObject *KOp::Call(KEnvironment *kenv)
 
   max = OPC_GETSTRING(Convention);
   for(i=0;i<max;i++)
-    data[p++] = (sU32) GetString(i);
+    data[p++] = (KSlot) GetString(i);
 
 // splines
 
   max = OPC_GETSPLINE(Convention);
   for(i=0;i<max;i++)
-    data[p++] = (sU32) GetSpline(i);
+    data[p++] = (KSlot) GetSpline(i);
 
 // outputcount
 
@@ -372,7 +384,7 @@ KObject *KOp::Call(KEnvironment *kenv)
       if(Input[i] && Input[i]->Cache && p<KK_MAXINPUT+128)
       {
         Input[i]->Cache->AddRef();
-        data[p++] = (sU32) Input[i]->Cache;
+        data[p++] = (KSlot) Input[i]->Cache;
       }
       else
         error = 1;
@@ -404,14 +416,14 @@ KObject *KOp::Call(KEnvironment *kenv)
     if(Convention&OPC_ALTINIT)
       p = pNoPara;
 
-    result = (KObject *)CallCode((sInt)InitHandler,(sInt *)data,p);
+    result = (KObject *)CALLHANDLER(InitHandler,data,p);
   }
 #else
   {
     if(Convention&OPC_ALTINIT)
       p = pNoPara;
 
-    result = (KObject *)CallCode((sInt)InitHandler,(sInt *)data,p);
+    result = (KObject *)CALLHANDLER(InitHandler,data,p);
   }
 #endif
 
@@ -484,7 +496,7 @@ void KOp::ExecWithNewMem(KEnvironment *kenv,KInstanceMem **link)
 
 void KOp::Exec(KEnvironment *kenv)
 {
-  sU32 data[KK_MAXINPUT+128];
+  KSlot data[KK_MAXINPUT+128];
   sInt p;
   sInt i,max;
   sInt pops;
@@ -525,32 +537,33 @@ void KOp::Exec(KEnvironment *kenv)
 
   if(Convention&OPC_ALTEXEC)
   {
-    ((void (__stdcall *)(KOp *,KEnvironment *))ExecHandler)(this,kenv);
+    ((void (__stdcall *)(KOp *,KEnvironment *))KHANDLER_FN(ExecHandler))(this,kenv);
   }
   else
   {
 
 // parameter-case
 
-    data[p++] = (sU32) this;              // obligatorische parameter
-    data[p++] = (sU32) kenv;              
+    data[p++] = (KSlot) this;              // obligatorische parameter
+    data[p++] = (KSlot) kenv;              
 
     max = OPC_GETDATA(Convention);        // normal parameters
-    sCopyMem(data+p,GetAnimPtrU(0),max*sizeof(sU32));
+    for(i=0;i<max;i++)
+      data[p+i] = GetAnimPtrU(0)[i];
     p += max;
 
     max = OPC_GETSTRING(Convention);      // strings
     for(i=0;i<max;i++)
-      data[p++] = (sU32) GetString(i);
+      data[p++] = (KSlot) GetString(i);
 
     max = OPC_GETSPLINE(Convention);      // splines
     for(i=0;i<max;i++)
-      data[p++] = (sU32) GetSpline(i);
+      data[p++] = (KSlot) GetSpline(i);
 
     if(Convention&OPC_OUTPUTCOUNT)        // outputcount
       data[p++] = OutputCount;
 
-    CallCode((sInt)ExecHandler,(sInt *)data,p);   // call
+    CALLHANDLER(ExecHandler,data,p);   // call
   }
 
 // end animation
@@ -636,7 +649,20 @@ void KOp::ExecEvent(KEnvironment *kenv,KEvent *event,sBool)
   kenv->Var[7].InitColor(event->Color);
 
   // time of year computation
-#if sUSE_TIME_OF_YEAR
+#if sUSE_TIME_OF_YEAR && sMAC
+  {
+    time_t now = ::time(0);             // "time" is a local here
+    struct tm t,s;
+    gmtime_r(&now,&t);
+    sSetMem(&s,0,sizeof(s));
+    s.tm_year = t.tm_year;
+    s.tm_mday = 1;
+    time_t startYear = timegm(&s);
+    s.tm_year++;
+    time_t endYear = timegm(&s);
+    kenv->Var[3].w = 1.0 * (now - startYear) / (endYear - startYear);
+  }
+#elif sUSE_TIME_OF_YEAR
   SYSTEMTIME systemTime;
   sU64 timeYear,startYear,endYear;
 
@@ -1533,6 +1559,24 @@ void KEvent::Stop()
 
 static KClass KClasses[256];
 
+// operators whose parameters changed after the old export format
+// (data/kkrieger3383.kx). new parameters are appended with editor defaults.
+struct KClassUpgrade
+{
+  sInt Id;
+  sU32 OldConvention;
+  sU32 NewConvention;
+  sInt Count;                     // number of appended data words
+  sF32 Float[6];                  // values (if IsFloat bit set)
+  sU32 IsFloat;
+};
+static const KClassUpgrade KUpgrades[] =
+{
+  { 0x82,0x06000004,0x06000005,1,{ 0 },0x00 },                            // cylinder: arc
+  { 0xf0,0x08000112,0x08000218,6,{ 0.015f,2.0f,0,0,1,1 },0x3f },          // viewport: stereo, window, spline input
+};
+static const KClassUpgrade *KClassUpgrades[256];
+
 static sBool DistributeAnimR(KOp *start)
 {
   sInt i;
@@ -1566,6 +1610,12 @@ void KDoc::Init(const sU8 *&dataPtr)
   data = dataPtr;
 
   flags = *(sU32 *)data; data+=4;
+  sBool oldFormat = (flags & ~0xff) != 0;
+  if(oldFormat)                   // older exports (e.g. data/kkrieger3383.kx) start
+  {                               // directly with the song size: song + samples, no name,
+    flags = 2;                    // and 8 bit class ids
+    data -= 4;
+  }
   BuzzTiming = (flags&4);
   if(flags&1) data+=32;
   SongSize = *(sU32 *)data; data+=4;
@@ -1592,7 +1642,12 @@ void KDoc::Init(const sU8 *&dataPtr)
   {
     data += 4;
     cls->Convention = conv;
-    i = *((sU16 *)data); data+=2;
+    if(oldFormat)
+      i = *data++;
+    else
+    {
+      i = *((sU16 *)data); data+=2;
+    }
     cls->Packing = (sChar *) data;
     while(*data++);
 
@@ -1602,6 +1657,12 @@ void KDoc::Init(const sU8 *&dataPtr)
 
     if(!handler->Id)
       sFatal("Unknown operator class %02x in class list.",i);
+
+    KClassUpgrades[nClasses] = 0;
+    if(oldFormat)
+      for(sInt u=0;u<sCOUNTOF(KUpgrades);u++)
+        if(KUpgrades[u].Id==i && (KUpgrades[u].OldConvention&0x7fffffff)==(conv&0x7fffffff))
+          KClassUpgrades[nClasses] = &KUpgrades[u];
 
 #if sOP_PERFORMANCE
     sChar buffer[64];
@@ -1625,12 +1686,18 @@ void KDoc::Init(const sU8 *&dataPtr)
 
     op = &Ops[i];
     sSetMem(op,0,sizeof(KOp));
-    op->Init(cls->Convention);
+    {
+      const KClassUpgrade *up = KClassUpgrades[typeByte & 0x7f];
+      sU32 conv = up ? (up->NewConvention | (cls->Convention & 0x80000000)) : cls->Convention;
+      op->Init(conv);
+      op->Convention = conv;
+    }
     op->Command = typeByte & 0x7f;
-    op->Convention = cls->Convention;
     op->InitHandler = cls->InitHandler;
     op->ExecHandler = cls->ExecHandler;
+#if !sMAC
     op->WheelSpeed = (sInt) cls->Packing; // abuse, yes.
+#endif
     op->OpId = i;
     op->AnimFlag = sTRUE; // first, assume that ops are all animated
 
@@ -1671,7 +1738,11 @@ void KDoc::Init(const sU8 *&dataPtr)
       if(op->Command == i)
       {
         // read data
+#if sMAC
+        pack = KClasses[i].Packing;     // pointers don't fit into WheelSpeed
+#else
         pack = (sChar *) op->WheelSpeed;
+#endif
 
         for(j=0;pack[j];j++)
         {
@@ -1689,6 +1760,17 @@ void KDoc::Init(const sU8 *&dataPtr)
           case 'b': *op->GetEditPtrU(j) = *data++;                                 break;
           case 'c': *op->GetEditPtrU(j) = *((sU32 *) data); data += 4;             break;
           case 'm': *op->GetEditPtrU(j) = *((sU32 *) data) & 0xffffff; data += 3;  break;
+          }
+        }
+
+        if(const KClassUpgrade *up = KClassUpgrades[i])
+        {
+          for(k=0;k<up->Count;k++)
+          {
+            if(up->IsFloat & (1<<k))
+              *op->GetEditPtrF(j+k) = up->Float[k];
+            else
+              *op->GetEditPtrU(j+k) = (sU32) up->Float[k];
           }
         }
 
@@ -1967,15 +2049,16 @@ void KOp::Init(sU32 convention)
   OutputMax = 4;
 #endif
 
-  size = DataMax*2+InputMax+LinkMax+OutputMax+StringMax*2+SplineMax+AnimMax;
+  const sInt pw = sizeof(void *)/sizeof(sU32);  // words per pointer (2 on 64 bit)
+  size = DataMax*2+(InputMax+LinkMax+OutputMax+StringMax+SplineMax)*pw+StringMax+AnimMax;
   mem = Memory = new sU32[size];
   sSetMem(mem,0,size*4);
 
-  Input = (KOp**) mem; mem+=InputMax;
-  Link = (KOp**) mem; mem+=LinkMax;
-  Output = (KOp**) mem; mem+=OutputMax;
-  String = (sChar**)mem; mem+=StringMax;
-  Spline = (KSpline**)mem; mem+=SplineMax;
+  Input = (KOp**) mem; mem+=InputMax*pw;
+  Link = (KOp**) mem; mem+=LinkMax*pw;
+  Output = (KOp**) mem; mem+=OutputMax*pw;
+  String = (sChar**)mem; mem+=StringMax*pw;
+  Spline = (KSpline**)mem; mem+=SplineMax*pw;
   DataEdit = mem; mem+=DataMax;
   DataAnim = mem; mem+=DataMax;
   for(i=0;i<StringMax;i++)
@@ -2492,7 +2575,7 @@ void __stdcall Exec_Misc_Trigger(KOp *op,KEnvironment *kenv,
 
   eop = op->GetLink(0);
 
-  if(eop && eop->ExecHandler == Exec_Misc_Event)
+  if(eop && KHANDLER_FN(eop->ExecHandler) == (void *)Exec_Misc_Event)
   {
     mem = kenv->GetInst<TriggerMem>(op);
     if(mem->Reset)

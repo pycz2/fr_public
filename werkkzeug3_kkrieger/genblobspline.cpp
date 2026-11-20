@@ -1,7 +1,9 @@
 // This file is distributed under a BSD license. See LICENSE.txt for details.
 
 #include "genblobspline.hpp"
-#include "werkkzeug.hpp"
+#if !sPLAYER
+#include "werkkzeug.hpp"            // tool only (pulls in the script compiler)
+#endif
 #include "genoverlay.hpp"
 
 struct InterpolElem

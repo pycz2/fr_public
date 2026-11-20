@@ -18,10 +18,23 @@
 #if sPROFILE
 #include "_util.hpp"
 
+
 sMAKEZONE(ExecWalk    ,"ExecWalk "  ,0xff8000d0);
 sMAKEZONE(PaintScene  ,"PaintScene" ,0xffb040ff);
 sMAKEZONE(ExecXForm   ,"ExecXForm"  ,0xff593d33);
 #endif
+
+// x86 passed s,r,t on the stack as one block of 9 floats, and the code read
+// it through &s.x. by-value parameters are not contiguous on other ABIs.
+struct SRTBlock
+{
+  sF32 v[9];
+  SRTBlock(const sF323 &s,const sF323 &r,const sF323 &t)
+  {
+    v[0]=s.x; v[1]=s.y; v[2]=s.z; v[3]=r.x; v[4]=r.y; v[5]=r.z; v[6]=t.x; v[7]=t.y; v[8]=t.z;
+  }
+};
+#define SRT_BLOCK(s,r,t) (SRTBlock(s,r,t).v)
 
 /****************************************************************************/
 
@@ -306,20 +319,26 @@ GenScene * __stdcall Init_Scene_Scene(GenMesh *mesh,sF323 s,sF323 r,sF323 t,sBoo
 
   scene = MakeScene(mesh);
   if(scene)
-    sCopyMem(scene->SRT,&s.x,9*4);
+    sCopyMem(scene->SRT,SRT_BLOCK(s,r,t),9*4);
 
   return scene;
 }
 
 void __stdcall Exec_Scene_Scene(KOp *op,KEnvironment *kenv,sF323 s,sF323 r,sF323 t,sBool lightmap)
 {
-  ExecSceneInputs(op,kenv,&s.x);
+  ExecSceneInputs(op,kenv,SRT_BLOCK(s,r,t));
 }
 
 /****************************************************************************/
 
+#if sMAC
+GenScene * __stdcall Init_Scene_Add(sInt count,GenScene **s0list)
+{
+  GenScene *&s0 = s0list[0];   // (&s0)[i] walks the input list
+#else
 GenScene * __stdcall Init_Scene_Add(sInt count,GenScene *s0,...)
 {
+#endif
   GenScene *scene,*add;
   sInt i;
 
@@ -351,7 +370,7 @@ GenScene * __stdcall Init_Scene_Multiply(GenScene *add,sF323 s,sF323 r,sF323 t,s
   scene = new GenScene;
   *scene->Childs.Add() = add;
   scene->Count = count;
-  sCopyMem(scene->SRT,&s.x,9*4);
+  sCopyMem(scene->SRT,SRT_BLOCK(s,r,t),9*4);
 
   return scene;
 }
@@ -363,7 +382,7 @@ void __stdcall Exec_Scene_Multiply(KOp *op,KEnvironment *kenv,sF323 s,sF323 r,sF
   sVector save;
 
   kenv->ExecStack.Dup();
-  mat.InitSRT(&s.x);
+  mat.InitSRT(SRT_BLOCK(s,r,t));
   save = kenv->Var[KV_SELECT];
   for(i=0;i<count;i++)
   {
@@ -386,7 +405,7 @@ GenScene * __stdcall Init_Scene_Transform(GenScene *add,sF323 s,sF323 r,sF323 t)
 
 void __stdcall Exec_Scene_Transform(KOp *op,KEnvironment *kenv,sF323 s,sF323 r,sF323 t)
 {
-  ExecSceneInputs(op,kenv,&s.x);
+  ExecSceneInputs(op,kenv,SRT_BLOCK(s,r,t));
 }
 
 /****************************************************************************/
@@ -433,7 +452,7 @@ void __stdcall Exec_Scene_Light(KOp *op,KEnvironment *kenv,sF323 r,sF323 t,sU32 
   light.Amplify = amplify;
   light.Range = range;
   light.Event = kenv->CurrentEvent;
-  light.Id = (sInt) op;
+  light.Id = (sInt)(sDInt) op;
 
   Engine->AddLightJob(light);
 
@@ -448,7 +467,7 @@ GenScene * __stdcall Init_Scene_Camera(sF323 s,sF323 r,sF323 t)
   GenScene *scene;
 
   scene = new GenScene;
-  sCopyMem(scene->SRT,&s.x,9*4);
+  sCopyMem(scene->SRT,SRT_BLOCK(s,r,t),9*4);
 
   return scene;
 }
@@ -460,12 +479,12 @@ void __stdcall Exec_Scene_Camera(KOp *op,KEnvironment *kenv,sF323 s,sF323 r,sF32
 #if !sPLAYER
   if(!GenOverlayManager->LinkEdit)
   {
-    mat.InitSRT(&s.x);
+    mat.InitSRT(SRT_BLOCK(s,r,t));
     kenv->GameCam.CameraSpace.MulA(mat,kenv->ExecStack.Top());
   }
 #else
   {
-    mat.InitSRT(&s.x);
+    mat.InitSRT(SRT_BLOCK(s,r,t));
     kenv->GameCam.CameraSpace.MulA(mat,kenv->ExecStack.Top());
   }
 #endif
@@ -680,7 +699,8 @@ void __stdcall Exec_Scene_Walk(KOp *op,KEnvironment *kenv,
     mem->InitSteps = FootCount*2;
     for(i=0;i<FootCount;i++)
     {
-      mem->FootDelta[i].Init((&l0)[i].x,(&l0)[i].y,(&l0)[i].z,0);
+      const sF323 legs[8] = { l0,l1,l2,l3,l4,l5,l6,l7 };   // was (&l0)[i]
+      mem->FootDelta[i].Init(legs[i].x,legs[i].y,legs[i].z,0);
       v.Add3(matrix.l,mem->FootDelta[i]);
       v.w = 0;
       mem->FootOld[i] = mem->FootNew[i] = v;
