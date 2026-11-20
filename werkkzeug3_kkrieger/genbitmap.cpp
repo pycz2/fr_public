@@ -2295,7 +2295,9 @@ GenBitmap * __stdcall Bitmap_Text(KOp *op,KEnvironment *kenv,GenBitmap *bm,sF32 
   sU32 fade;
   sInt xs,ys,xp,yp,yf,is,es,xp0,lsk;
   sU32 *s;
-#if !sINTRO
+// font pages are needed by the kkrieger player for its hud ("life", "ammo")
+#define sTEXT_PAGES (!sINTRO || sLINK_KKRIEGER)
+#if sTEXT_PAGES
   sInt w0,w1,w2;
   sInt count,chr;
   sInt page;
@@ -2324,8 +2326,10 @@ GenBitmap * __stdcall Bitmap_Text(KOp *op,KEnvironment *kenv,GenBitmap *bm,sF32 
   yp = y*ys+es;
 
   data = (sU8*)op->GetBlob(size);
-#if !sINTRO
+#if sTEXT_PAGES
   page = (flags&0x70)>>4;
+#endif
+#if !sINTRO
   if((flags&0x80) && data && data[0]==3 && data[1]==(page!=0) && 
     *((sU16 *)(data+2))==bm->XSize && *((sU16 *)(data+4))==bm->YSize)
   {
@@ -2360,7 +2364,7 @@ GenBitmap * __stdcall Bitmap_Text(KOp *op,KEnvironment *kenv,GenBitmap *bm,sF32 
 
     yf = sSystem->FontBegin(xs,ys,font,xs*height,ys*width,4);
     lsk = lineskip * yf;
-#if !sINTRO
+#if sTEXT_PAGES
     if(page)                            // font mode
     {
       count = 0;
@@ -2527,7 +2531,7 @@ GenBitmap * __stdcall Bitmap_Text(KOp *op,KEnvironment *kenv,GenBitmap *bm,sF32 
     sSystem->FontEnd();
   }
 
-#if !sINTRO
+#if sTEXT_PAGES
   if(page)
   {
     for(i=0;i<256;i++)

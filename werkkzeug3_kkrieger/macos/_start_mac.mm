@@ -55,29 +55,16 @@ void MacSoundInit();
 void MacSoundExit();
 static sU64 StartTimeNs;
 
-// per-texture data that does not fit into sHardTex (which has a D3D pointer)
-struct MacTexture
-{
-  sU32 *Level0;                   // 8 bit texels of the top mip level, D3D byte order
-  sInt Generation;                // incremented for each upload
-};
-static MacTexture MacTextures[MAX_TEXTURE];
+// renderer (render_metal.mm)
+void MacRenderInit(NSView *view,sInt xs,sInt ys);
+void MacRenderPresent();
+void MacRenderProgress(sInt done,sInt max);
+void MacRenderScreenshot(const char *path);
+sBool MacReadTexture(sInt handle,sU32 *dest);
+extern sInt MacDrawCalls;
 
-// geometry: every handle owns its own memory
-struct MacGeo
-{
-  sU8 *Vertex;
-  sInt VertexAlloc;
-  sU8 *Index;
-  sInt IndexAlloc;
-  sInt Dirty;                     // sGEO_VERTEX/sGEO_INDEX: must be uploaded again
-};
-static MacGeo MacGeos[MAX_GEOHANDLE];
-
-static const sInt FVFSize[] = { 0,32,32,64,16,16,32,48 };  // see sFVF_??? in _start.hpp
-
-static sInt DrawCalls;
-static sInt StateChanges;
+static sInt ScreenshotFrame = -1;           // test: write the back buffer as PNG
+static const char *ScreenshotPath = 0;
 
 /****************************************************************************/
 /***                                                                      ***/
@@ -91,6 +78,11 @@ static void ParseArgs(int argc,char **argv)
   {
     if(!strcmp(argv[i],"--dump-textures") && i+1<argc)
       DumpDir = argv[++i];
+    else if(!strcmp(argv[i],"--screenshot") && i+2<argc)
+    {
+      ScreenshotFrame = atoi(argv[++i]);
+      ScreenshotPath = argv[++i];
+    }
     else if(!strcmp(argv[i],"--press-enter"))
       PressEnter = sTRUE;
     else if(!strcmp(argv[i],"--headless"))
@@ -120,25 +112,16 @@ int main(int argc,char **argv)
 
 static void DumpTextures()
 {
-  sInt live = 0, bytes = 0;
+  mkdir(DumpDir,0755);
+  sInt n = 0;
   for(sInt i=0;i<MAX_TEXTURE;i++)
   {
-    if(sSystem->Textures[i].Flags)
+    sHardTex *tex = &sSystem->Textures[i];
+    if(!tex->Flags)
+      continue;
+    sU32 *texels = new sU32[tex->XSize*tex->YSize];
+    if(MacReadTexture(i,texels))
     {
-      live++;
-      bytes += sSystem->Textures[i].XSize*sSystem->Textures[i].YSize*4;
-    }
-  }
-  fprintf(stderr,"textures: %d alive, %d KB (top level)\n",live,bytes/1024);
-
-  {
-    mkdir(DumpDir,0755);
-    sInt n = 0;
-    for(sInt i=0;i<MAX_TEXTURE;i++)
-    {
-      sHardTex *tex = &sSystem->Textures[i];
-      if(!tex->Flags || !MacTextures[i].Level0)
-        continue;
       char name[1024];
       snprintf(name,sizeof(name),"%s/tex%03d_%dx%d.tga",DumpDir,i,tex->XSize,tex->YSize);
       sU8 header[18] = {0};
@@ -147,17 +130,17 @@ static void DumpTextures()
       header[14] = tex->YSize & 255; header[15] = tex->YSize >> 8;
       header[16] = 32;
       header[17] = 0x28;                              // top-down, 8 alpha bits
-      FILE *f = fopen(name,"wb");
-      if(f)
+      if(FILE *f = fopen(name,"wb"))
       {
         fwrite(header,1,18,f);
-        fwrite(MacTextures[i].Level0,4,tex->XSize*tex->YSize,f);
+        fwrite(texels,4,tex->XSize*tex->YSize,f);
         fclose(f);
         n++;
       }
     }
-    fprintf(stderr,"dumped %d textures to %s\n",n,DumpDir);
+    delete[] texels;
   }
+  fprintf(stderr,"dumped %d textures to %s\n",n,DumpDir);
 }
 
 /****************************************************************************/
@@ -289,10 +272,7 @@ static void CreateAppWindow()
   Window.acceptsMouseMovedEvents = YES;
   Window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
   Window.delegate = delegate;
-  NSView *view = [[NSView alloc] initWithFrame:r];
-  view.wantsLayer = YES;
-  view.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
-  Window.contentView = view;
+  Window.contentView = [[NSView alloc] initWithFrame:r];
   [Window center];
   [Window makeKeyAndOrderFront:nil];
   [NSApp finishLaunching];
@@ -320,6 +300,7 @@ void sSystem_::InitX()
 
   if(!Headless)
     CreateAppWindow();
+  MacRenderInit(Headless ? nil : Window.contentView,ConfigX,ConfigY);
 
   sInt t0 = GetTime();
   sAppHandler(sAPPCODE_INIT,0);
@@ -341,14 +322,15 @@ void sSystem_::InitX()
       sAppHandler(sAPPCODE_KEY,KeyBuffer[i]);
     KeyIndex = 0;
 
-    DrawCalls = 0;
-    StateChanges = 0;
+    MacDrawCalls = 0;
     Render();
     if(Headless && (!PressEnter || f%60==0))
-      fprintf(stderr,"frame %d: %d draw calls, %d state changes\n",f,DrawCalls,StateChanges);
+      fprintf(stderr,"frame %d: %d draw calls\n",f,MacDrawCalls);
+    if(f==ScreenshotFrame)
+      MacRenderScreenshot(ScreenshotPath);
 
-    // ~60 fps until the renderer paces frames with the display
-    if(!Headless || PressEnter)
+    // the window is paced by the display; tests run at ~60 fps
+    if(Headless && PressEnter)
     {
       sInt wait = lastFrameTime + 16 - GetTime();
       if(wait>0) usleep(wait*1000);
@@ -382,6 +364,7 @@ void sSystem_::Render()
 
   sAppHandler(sAPPCODE_FRAME,0);
   sAppHandler(sAPPCODE_PAINT,0);
+  MacRenderPresent();
 }
 
 void sSystem_::Exit()
@@ -421,6 +404,7 @@ void sSystem_::Progress(sInt done,sInt max)
     lasttime = time;
     if(Headless)
       fprintf(stderr,"progress: %d/%d\n",done,max);
+    MacRenderProgress(done,max);
     PumpEvents();
     if(Quit)
       exit(0);
@@ -581,6 +565,25 @@ sInt sSystem_::FontWidth(const sChar *string,sInt len)
   return (sInt)sFRound(w);
 }
 
+// GDI's GetCharABCWidths: A = left bearing, B = black box width, C = rest of the advance
+void sSystem_::FontCharWidth(sInt ch,sInt *widths)
+{
+  sU8 c = ch;
+  CFStringRef str = CFStringCreateWithBytes(0,&c,1,kCFStringEncodingWindowsLatin1,false);
+  UniChar uc = str && CFStringGetLength(str) ? CFStringGetCharacterAtIndex(str,0) : ' ';
+  if(str) CFRelease(str);
+  CGGlyph glyph = 0;
+  CTFontGetGlyphsForCharacters(FontRef,&uc,&glyph,1);
+  CGSize adv;
+  CGRect box = CTFontGetBoundingRectsForGlyphs(FontRef,kCTFontOrientationHorizontal,&glyph,0,1);
+  CTFontGetAdvancesForGlyphs(FontRef,kCTFontOrientationHorizontal,&glyph,&adv,1);
+  sInt a = (sInt)floor(box.origin.x);
+  sInt b = sMax<sInt>(1,(sInt)ceil(box.origin.x+box.size.width)-a);
+  widths[0] = a;
+  widths[1] = b;
+  widths[2] = (sInt)sFRound(adv.width)-a-b;
+}
+
 void sSystem_::FontPrint(sInt x,sInt y,const sChar *string,sInt len)
 {
   CTLineRef line = MakeLine(string,len);
@@ -602,172 +605,9 @@ void sSystem_::FontEnd()
 
 /****************************************************************************/
 /***                                                                      ***/
-/***   Textures                                                           ***/
+/***   Transforms                                ***/
 /***                                                                      ***/
 /****************************************************************************/
-
-// 16 bit per channel (B,G,R,A) to the 8 bit texel layout of the D3D version.
-// mip levels are generated the same way, but only the top level is kept here.
-static void ConvertTexture(sHardTex *tex,MacTexture *mt,const sU16 *source)
-{
-  sInt xs = tex->XSize, ys = tex->YSize;
-  delete[] mt->Level0;
-  mt->Level0 = new sU32[xs*ys];
-  sU32 *d = mt->Level0;
-  const sU16 *s16 = source;
-
-  for(sInt i=0;i<xs*ys;i++)
-  {
-    if(tex->Format==sTF_Q8W8V8U8)
-    {
-      d[i] = (((((sInt)s16[2]-0x4000)>>7)&0xff)    ) |
-             (((((sInt)s16[1]-0x4000)>>7)&0xff)<< 8) |
-             (((((sInt)s16[0]-0x4000)>>7)&0xff)<<16) |
-             (((((sInt)s16[3]-0x4000)>>7)&0xff)<<24);
-    }
-    else
-    {
-      d[i] = (((s16[0]>>7)&0xff)    ) |
-             (((s16[1]>>7)&0xff)<< 8) |
-             (((s16[2]>>7)&0xff)<<16) |
-             (((s16[3]>>7)&0xff)<<24);
-    }
-    s16 += 4;
-  }
-  mt->Generation++;
-}
-
-sInt sSystem_::AddTexture(sInt xs,sInt ys,sInt format,sU16 *data,sInt mipcount,sInt miptresh)
-{
-  sVERIFY(format>0 && format<sTF_MAX);
-
-  for(sInt i=0;i<MAX_TEXTURE;i++)
-  {
-    sHardTex *tex = &Textures[i];
-    if(tex->Flags==0)
-    {
-      mipcount = sMin(mipcount,sGetPower2(xs));
-      mipcount = sMin(mipcount,sGetPower2(ys));
-      if(xs & (xs-1) || ys & (ys-1))
-        mipcount = 1;
-
-      tex->RefCount = 1;
-      tex->XSize = xs;
-      tex->YSize = ys;
-      tex->Flags = sTIF_ALLOCATED;
-      tex->Format = format;
-      tex->MipLevels = mipcount;
-      tex->Tex = 0;
-
-      if(data==0)
-      {
-        if(tex->XSize==0)
-        {
-          tex->XSize = Screen[0].XSize;
-          tex->YSize = Screen[0].YSize;
-        }
-        tex->Flags |= sTIF_RENDERTARGET;
-      }
-      else
-        ConvertTexture(tex,&MacTextures[i],data);
-      return i;
-    }
-  }
-  return sINVALID;
-}
-
-void sSystem_::AddRefTexture(sInt handle)
-{
-  if(handle!=sINVALID)
-  {
-    sVERIFY(handle>=0 && handle<MAX_TEXTURE);
-    sVERIFY(Textures[handle].RefCount>0);
-    Textures[handle].RefCount++;
-  }
-}
-
-void sSystem_::RemTexture(sInt handle)
-{
-  if(handle!=sINVALID)
-  {
-    sVERIFY(handle>=0 && handle<MAX_TEXTURE);
-    sHardTex *tex = &Textures[handle];
-    sVERIFY(tex->RefCount>=1);
-    if(--tex->RefCount==0)
-    {
-      delete[] MacTextures[handle].Level0;
-      MacTextures[handle].Level0 = 0;
-      tex->Flags = 0;
-      tex->Tex = 0;
-    }
-  }
-}
-
-void sSystem_::GetTextureSize(sInt handle,sInt &w,sInt &h)
-{
-  if(handle != sINVALID)
-  {
-    sVERIFY(handle>=0 && handle<MAX_TEXTURE);
-    w = Textures[handle].XSize;
-    h = Textures[handle].YSize;
-  }
-}
-
-void sSystem_::GrabScreen(sInt sourceRT,const sRect &win,sInt tex,sBool stretch)
-{
-}
-
-/****************************************************************************/
-/***                                                                      ***/
-/***   Viewport, transforms, render states                                ***/
-/***                                                                      ***/
-/****************************************************************************/
-
-void sSystem_::Clear(sU32 flags,sU32 color)
-{
-}
-
-void sSystem_::SetViewport(const sViewport &vp)
-{
-  sInt txs,tys;
-
-  CurrentViewport = vp;
-  if(vp.RenderTarget == sINVALID)
-  {
-    txs = Screen[vp.Screen].XSize;
-    tys = Screen[vp.Screen].YSize;
-  }
-  else
-  {
-    sVERIFY(Textures[vp.RenderTarget].Flags & sTIF_RENDERTARGET);
-    txs = Textures[vp.RenderTarget].XSize;
-    tys = Textures[vp.RenderTarget].YSize;
-  }
-
-  if(!vp.Window.XSize() || !vp.Window.YSize())
-    CurrentViewport.Window.Init(0,0,txs,tys);
-
-  ViewportX = CurrentViewport.Window.XSize();
-  ViewportY = CurrentViewport.Window.YSize();
-}
-
-void sSystem_::SetScissor(const sFRect *scissor)
-{
-}
-
-void sSystem_::SetStates(sU32 *stream)
-{
-  while(*stream!=0xffffffff)
-  {
-    SetState(stream[0],stream[1]);
-    stream += 2;
-  }
-}
-
-void sSystem_::SetState(sU32 token,sU32 value)
-{
-  StateChanges++;
-}
 
 void sSystem_::SetViewProject(const sMaterialEnv *env)
 {
@@ -806,222 +646,6 @@ void sSystem_::GetTransform(sInt mode,sMatrix &mat)
 
 /****************************************************************************/
 /***                                                                      ***/
-/***   Geometry                                                           ***/
-/***                                                                      ***/
-/****************************************************************************/
-
-sInt sSystem_::GeoAdd(sInt fvf,sInt prim)
-{
-  sVERIFY(fvf>=1 && fvf<(sInt)sCOUNTOF(FVFSize));
-  for(sInt i=1;i<MAX_GEOHANDLE;i++)
-  {
-    sGeoHandle *gh = &GeoHandle[i];
-    if(gh->Mode==0)
-    {
-      sSetMem(gh,0,sizeof(*gh));
-      gh->VertexSize = FVFSize[fvf];
-      gh->FVF = fvf;
-      gh->Mode = prim;
-      MacGeos[i].Dirty = sGEO_VERTEX|sGEO_INDEX;
-      return i;
-    }
-  }
-  sFatal("GeoAdd() ran out of handles");
-  return 0;
-}
-
-void sSystem_::GeoRem(sInt handle)
-{
-  sVERIFY(handle>=1 && handle<MAX_GEOHANDLE);
-  sVERIFY(GeoHandle[handle].Mode!=0);
-  MacGeo *mg = &MacGeos[handle];
-  delete[] mg->Vertex;
-  delete[] mg->Index;
-  sSetMem(mg,0,sizeof(*mg));
-  GeoHandle[handle].Mode = 0;
-}
-
-// dynamic buffers are "discarded" on request; static ones stay valid
-void sSystem_::GeoFlush(sInt handle,sInt what)
-{
-  sVERIFY(handle>=1 && handle<MAX_GEOHANDLE);
-  sGeoHandle *gh = &GeoHandle[handle];
-  if((what & sGEO_VERTEX) && !(gh->Mode & sGEO_STATVB)) MacGeos[handle].Dirty |= sGEO_VERTEX;
-  if((what & sGEO_INDEX) && !(gh->Mode & sGEO_STATIB))  MacGeos[handle].Dirty |= sGEO_INDEX;
-}
-
-sInt sSystem_::GeoDraw(sInt &handle)
-{
-  sVERIFY(handle>=1 && handle<MAX_GEOHANDLE);
-  sVERIFY(GeoHandle[handle].Mode!=0);
-  sGeoHandle *gh = &GeoHandle[handle];
-
-  sInt update = MacGeos[handle].Dirty;
-  if(gh->Vertex.Count == 0)
-    update |= sGEO_VERTEX|sGEO_INDEX;
-  if(update)
-    return update;
-
-  DrawCalls++;
-  return 0;
-}
-
-static void GrowBuffer(sU8 *&mem,sInt &alloc,sInt size)
-{
-  if(size>alloc)
-  {
-    delete[] mem;
-    alloc = sMax(size,alloc*2);
-    mem = new sU8[alloc];
-  }
-}
-
-void sSystem_::GeoBegin(sInt handle,sInt vc,sInt ic,sF32 **fp,void **ip,sInt upd)
-{
-  sVERIFY(handle>=1 && handle<MAX_GEOHANDLE);
-  sVERIFY(GeoHandle[handle].Mode!=0);
-  sGeoHandle *gh = &GeoHandle[handle];
-  MacGeo *mg = &MacGeos[handle];
-
-  if(fp) *fp = 0;
-  if(ip) *ip = 0;
-
-  if(upd & sGEO_VERTEX)
-  {
-    gh->Vertex.Start = 0;
-    gh->Vertex.Count = vc;
-    GrowBuffer(mg->Vertex,mg->VertexAlloc,vc*gh->VertexSize);
-    if(fp) *fp = (sF32 *) mg->Vertex;
-    gh->Locked |= sGEO_VERTEX;
-    mg->Dirty &= ~sGEO_VERTEX;
-  }
-  if(upd & sGEO_INDEX)
-  {
-    gh->Index.Start = 0;
-    gh->Index.Count = ic;
-    if(ic)
-    {
-      GrowBuffer(mg->Index,mg->IndexAlloc,ic*((gh->Mode & sGEO_IND32B) ? 4 : 2));
-      if(ip) *ip = mg->Index;
-      gh->Locked |= sGEO_INDEX;
-    }
-    mg->Dirty &= ~sGEO_INDEX;
-  }
-}
-
-void sSystem_::GeoEnd(sInt handle,sInt vc,sInt ic)
-{
-  sVERIFY(handle>=1 && handle<MAX_GEOHANDLE);
-  sGeoHandle *gh = &GeoHandle[handle];
-  gh->Locked = 0;
-  if(vc!=-1) gh->Vertex.Count = vc;
-  if(ic!=-1) gh->Index.Count = ic;
-}
-
-/****************************************************************************/
-/***                                                                      ***/
-/***   Material setups                                                    ***/
-/***                                                                      ***/
-/****************************************************************************/
-
-static sInt ShaderLength(const sU32 *code)
-{
-  if(!code) return 0;
-  sInt i = 0;
-  while(code[i]!=0x0000ffff) i++;   // D3D end token
-  return i+1;
-}
-
-sInt sSystem_::MtrlAddSetup(const sU32 *states,const sU32 *vs,const sU32 *ps)
-{
-  sInt stateLen;
-  for(stateLen=0;states[stateLen] != ~0U;stateLen+=2);
-  stateLen += 2;
-
-  sInt id;
-  for(id=0;id<MAX_SETUPS;id++)
-    if(!Setups[id].RefCount)
-      break;
-  if(id==MAX_SETUPS)
-    return sINVALID;
-
-  sMaterialSetup *setup = &Setups[id];
-  sInt vsLen = ShaderLength(vs), psLen = ShaderLength(ps);
-  setup->RefCount = 1;
-  setup->States = new sU32[stateLen];
-  setup->VSCode = vsLen ? new sU32[vsLen] : 0;
-  setup->PSCode = psLen ? new sU32[psLen] : 0;
-  setup->VS = 0;
-  setup->PS = 0;
-  sCopyMem(setup->States,states,stateLen*4);
-  if(vsLen) sCopyMem(setup->VSCode,vs,vsLen*4);
-  if(psLen) sCopyMem(setup->PSCode,ps,psLen*4);
-  return id;
-}
-
-void sMaterialSetup::Cleanup()
-{
-  delete[] States;
-  delete[] VSCode;
-  delete[] PSCode;
-  States = VSCode = PSCode = 0;
-}
-
-void sSystem_::MtrlAddRefSetup(sInt sid)
-{
-  sVERIFY(sid >= 0 && sid < MAX_SETUPS);
-  sVERIFY(Setups[sid].RefCount);
-  Setups[sid].AddRef();
-}
-
-void sSystem_::MtrlRemSetup(sInt sid)
-{
-  sVERIFY(sid >= 0 && sid < MAX_SETUPS);
-  sVERIFY(Setups[sid].RefCount);
-  Setups[sid].Release();
-}
-
-void sSystem_::MtrlClearCaches()
-{
-  CurrentSetupId = sINVALID;
-  for(sInt i=0;i<MAX_TEXSTAGE;i++)
-    CurrentTextures[i] = sINVALID;
-  for(sInt i=0;i<0x310;i++)
-    CurrentStates[i] = 0xfefefefe;
-}
-
-void sSystem_::MtrlSetSetup(sInt sid)
-{
-  if(sid == CurrentSetupId)
-    return;
-  sVERIFY(sid >= 0 && sid < MAX_SETUPS);
-  sMaterialSetup *setup = &Setups[sid];
-  sVERIFY(setup->RefCount > 0);
-
-  if(CurrentSetupId != sINVALID)
-    Setups[CurrentSetupId].Release();
-  setup->AddRef();
-
-  for(sU32 *st = setup->States;st[0] != ~0U;st += 2)
-  {
-    sVERIFY(st[0] < 0x310);
-    if(st[1] != CurrentStates[st[0]])
-    {
-      SetState(st[0],st[1]);
-      CurrentStates[st[0]] = st[1];
-    }
-  }
-  CurrentSetupId = sid;
-}
-
-void sSystem_::MtrlSetInstance(const sMaterialInstance &inst)
-{
-  for(sInt i=0;i<inst.NumTextures;i++)
-    CurrentTextures[i] = inst.Textures[i];
-}
-
-/****************************************************************************/
-/***                                                                      ***/
 /***   Platform independent helpers (copied from _start.cpp)              ***/
 /***                                                                      ***/
 /****************************************************************************/
@@ -1046,8 +670,10 @@ void sMaterialEnv::Init()
 void sMaterialEnv::MakeProjectionMatrix(sMatrix &pmat) const
 {
   sF32 q;
-  sF32 shiftX = 1.0f / sSystem->ViewportX;
-  sF32 shiftY = 1.0f / sSystem->ViewportY;
+  // D3D9 needs geometry moved by half a pixel to map texels to pixels 1:1,
+  // Metal (like D3D10+) does not
+  sF32 shiftX = 0.0f;
+  sF32 shiftY = 0.0f;
 
   switch(Orthogonal)
   {

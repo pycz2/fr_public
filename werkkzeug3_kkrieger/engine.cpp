@@ -2748,7 +2748,9 @@ void Engine_::AddSectorJob(GenScene *sector,KOp *sectorData,const sMatrix &matri
 
 void Engine_::ProcessPortals(KEnvironment *kenv,KKriegerCell *observerCell)
 {
-#if !sINTRO // no portal culling in intros
+  // this was "#if !sINTRO // no portal culling in intros", but the kkrieger
+  // player is built with sINTRO and its level is made of sectors: without
+  // this code the level was never painted.
   sFRect unitBox;
   unitBox.Init(-1,-1,1,1);
 
@@ -2804,7 +2806,6 @@ void Engine_::ProcessPortals(KEnvironment *kenv,KKriegerCell *observerCell)
   CurrentSectorPaint = sTRUE;
   Frustum.FromViewProject(ViewProject,unitBox);
   Frustum.Normalize();
-#endif
 }
 
 /****************************************************************************/

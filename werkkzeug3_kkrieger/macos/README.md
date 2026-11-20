@@ -16,7 +16,9 @@ make
 - Stage 1: content generation. The player loads `data/kkrieger3383.kx` and builds
   all textures, meshes, sounds and the level.
 - Stage 2: window (AppKit), keyboard and mouse, sound (AudioQueue with a small
-  mixer for the sound effects). The window stays black: there is no renderer yet.
+  mixer for the sound effects).
+- Stage 3: Metal renderer. The D3D9 shaders of the materials (vs_1_1, ps_1_1)
+  are translated to Metal Shading Language at run time.
 
 Controls: W/A/S/D, mouse, left button, space. The first click in the window
 captures the mouse, switching to another window releases it. Cmd-F toggles
@@ -30,6 +32,7 @@ Options:
 - `--press-enter`: press Enter every 0.5 s, which walks through intro and menu
   into the game
 - `--dump-textures dir`: write every texture as a TGA file
+- `--screenshot n file.png`: write the back buffer of frame n
 
 ## What had to change
 
@@ -53,6 +56,16 @@ Options:
   `V2Synth::init` cleared only `sizeof(this)` bytes, so a second song kept the
   state of the first one and crashed.
 - `_start_mac.mm` replaces `_start.cpp`. Fonts use CoreText instead of GDI.
+- Rendering (`render_metal.mm`) keeps the Direct3D 9 model: a render state
+  array, material setups with D3D9 shader bytecode, an 800x600 back buffer.
+  `d3d9_msl.cpp` translates the shaders, including the ps_1_1 rules (register
+  range [-1,1], `_bx2`/`_bias`/`_sat` modifiers, co-issued instructions).
+  Pipeline and depth/stencil states are cached by their D3D states.
+- Two things were switched off for `sINTRO` builds although the kkrieger player
+  needs them: portal processing in `Engine_::ProcessPortals` (the level was not
+  painted at all) and font pages in `Bitmap_Text` (no hud text).
+- Texture handle 0 is reserved. `GenOverlayManager` uses it as a placeholder
+  and released the real texture in that slot (the hud font) while it was in use.
 - Compiler flags: `-fno-delete-null-pointer-checks` (the code tests `this`
   against 0) and `-ffp-contract=off` (x87 had no fused multiply-add, and the
   collision code depends on consistent rounding).
