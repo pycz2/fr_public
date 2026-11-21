@@ -853,8 +853,13 @@ void sSystem_::SetStates(sU32 *stream)
 
 void sSystem_::SetState(sU32 token,sU32 value)
 {
+  // keep the cache of MtrlSetSetup in step, like the d3d version did:
+  // states set directly (shadow volumes) were not restored by the next setup
   if(token<0x310)
+  {
     State[token] = value;
+    CurrentStates[token] = value;
+  }
 }
 
 static sInt ShaderLength(const sU32 *code)

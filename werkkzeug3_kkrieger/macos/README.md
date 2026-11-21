@@ -99,6 +99,10 @@ Options:
   with it because its dynamic index buffer was discarded often.
 - The far plane of the projection is at infinity, where the shadow volumes
   end. The depth is clamped there instead of clipped.
+- `SetState` did not update the state cache of `MtrlSetSetup`. States set
+  directly, like the stencil and cull states of the shadow volumes, were not
+  restored by the next material, so light passes kept counting the stencil.
+  This drew black bands, the shadows of objects behind, on walls and pillars.
 - A stencil-only clear also cleared the depth buffer. After the shadow pass
   of a light, the following passes (light, texture) failed their depth test,
   and the level was drawn without textures.
