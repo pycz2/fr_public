@@ -63,8 +63,10 @@ void MacRenderScreenshot(const char *path);
 sBool MacReadTexture(sInt handle,sU32 *dest);
 extern sInt MacDrawCalls;
 
-static sInt ScreenshotFrame = -1;           // test: write the back buffer as PNG
-static const char *ScreenshotPath = 0;
+static sInt ScreenshotFrame[32];             // test: write the back buffer as PNG
+static const char *ScreenshotPath[32];
+static sInt ScreenshotCount = 0;
+static sInt HeadlessTime = -1;               // headless runs use a fixed 60 Hz clock
 
 /****************************************************************************/
 /***                                                                      ***/
@@ -80,13 +82,17 @@ static void ParseArgs(int argc,char **argv)
       DumpDir = argv[++i];
     else if(!strcmp(argv[i],"--screenshot") && i+2<argc)
     {
-      ScreenshotFrame = atoi(argv[++i]);
-      ScreenshotPath = argv[++i];
+      if(ScreenshotCount<32)
+      {
+        ScreenshotFrame[ScreenshotCount] = atoi(argv[i+1]);
+        ScreenshotPath[ScreenshotCount++] = argv[i+2];
+      }
+      i += 2;
     }
     else if(!strcmp(argv[i],"--press-enter"))
       PressEnter = sTRUE;
     else if(!strcmp(argv[i],"--headless"))
-      Headless = sTRUE;
+      Headless = sTRUE, HeadlessTime = 0;
     else if(!strcmp(argv[i],"--fullscreen"))
       Fullscreen = sTRUE;
     else if(!strcmp(argv[i],"--frames") && i+1<argc)
@@ -309,7 +315,6 @@ void sSystem_::InitX()
   if(!Headless)
     MacSoundInit();
 
-  sInt lastFrameTime = GetTime();
   for(sInt f=0;!Quit && (FrameCount<=0 || f<FrameCount);f++)
   {
     PumpEvents();
@@ -326,16 +331,14 @@ void sSystem_::InitX()
     Render();
     if(Headless && (!PressEnter || f%60==0))
       fprintf(stderr,"frame %d: %d draw calls\n",f,MacDrawCalls);
-    if(f==ScreenshotFrame)
-      MacRenderScreenshot(ScreenshotPath);
+    for(sInt i=0;i<ScreenshotCount;i++)
+      if(f==ScreenshotFrame[i])
+        MacRenderScreenshot(ScreenshotPath[i]);
 
-    // the window is paced by the display; tests run at ~60 fps
-    if(Headless && (PressEnter || ScreenshotFrame>=0))
-    {
-      sInt wait = lastFrameTime + 16 - GetTime();
-      if(wait>0) usleep(wait*1000);
-      lastFrameTime = GetTime();
-    }
+    // the window is paced by the display. headless runs step the clock by
+    // 1/60 s per frame, so a frame number always shows the same picture.
+    if(Headless)
+      HeadlessTime += 16;
   }
 
   if(!Headless)
@@ -392,6 +395,8 @@ sChar *sSystem_::GetCmdLine()
 
 sInt sSystem_::GetTime()
 {
+  if(HeadlessTime>=0)
+    return HeadlessTime;
   return (sInt)((clock_gettime_nsec_np(CLOCK_UPTIME_RAW)-StartTimeNs)/1000000);
 }
 

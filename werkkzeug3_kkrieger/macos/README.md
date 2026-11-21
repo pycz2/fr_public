@@ -53,7 +53,8 @@ Options:
 - `--press-enter`: press Enter every 0.5 s, which walks through intro and menu
   into the game
 - `--dump-textures dir`: write every texture as a TGA file
-- `--screenshot n file.png`: write the back buffer of frame n
+- `--screenshot n file.png`: write the back buffer of frame n (can be given
+  several times). Runs with `--headless` step the clock by 1/60 s per frame.
 
 ## What had to change
 
@@ -87,6 +88,10 @@ Options:
   painted at all) and font pages in `Bitmap_Text` (no hud text).
 - Texture handle 0 is reserved. `GenOverlayManager` uses it as a placeholder
   and released the real texture in that slot (the hud font) while it was in use.
+- With culling off (the shadow volumes) the front-facing winding stayed as
+  the previous draw had set it, so the two-sided stencil counted the faces
+  of the shadow volumes the wrong way round now and then. D3D front faces
+  are always the clockwise ones.
 - A stencil-only clear also cleared the depth buffer. After the shadow pass
   of a light, the following passes (light, texture) failed their depth test,
   and the level was drawn without textures.

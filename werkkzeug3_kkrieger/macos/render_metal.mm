@@ -1367,10 +1367,14 @@ sInt sSystem_::GeoDraw(sInt &handle)
   [Enc setRenderPipelineState:pipe];
   [Enc setDepthStencilState:GetDepthState()];
   [Enc setStencilReferenceValue:State[sD3DRS_STENCILREF]&0xff];
+  // d3d: clockwise faces are the front faces, always. the two-sided stencil
+  // of the shadow volumes (CULL_NONE) depends on it: the CCW_STENCIL* ops
+  // belong to the counter-clockwise faces.
+  [Enc setFrontFacingWinding:MTLWindingClockwise];
   switch(State[sD3DRS_CULLMODE])
   {
-  case sD3DCULL_CW:  [Enc setFrontFacingWinding:MTLWindingCounterClockwise]; [Enc setCullMode:MTLCullModeBack]; break;
-  case sD3DCULL_CCW: [Enc setFrontFacingWinding:MTLWindingClockwise];        [Enc setCullMode:MTLCullModeBack]; break;
+  case sD3DCULL_CW:  [Enc setCullMode:MTLCullModeFront]; break;
+  case sD3DCULL_CCW: [Enc setCullMode:MTLCullModeBack]; break;
   default:           [Enc setCullMode:MTLCullModeNone]; break;
   }
   [Enc setTriangleFillMode:State[sD3DRS_FILLMODE]==2 ? MTLTriangleFillModeLines : MTLTriangleFillModeFill];
