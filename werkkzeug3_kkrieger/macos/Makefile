@@ -53,7 +53,8 @@ PLAYER_SRC := materials/material11.cpp materials/rtmanager.cpp shadercodegen.cpp
               kdoc.cpp player_kkrieger/kkrieger_oplist.cpp kkriegergame.cpp mainplayer.cpp
 PLAYER_OBJ := $(patsubst %.cpp,$(BUILD)/obj/%.o,$(notdir $(PLAYER_SRC)))
 MAC_OBJ    := $(BUILD)/obj/_start_mac.o $(BUILD)/obj/sound_mac.o $(BUILD)/obj/render_metal.o \
-              $(BUILD)/obj/d3d9_msl.o $(BUILD)/obj/v2bridge.o $(BUILD)/obj/kxdata.o
+              $(BUILD)/obj/d3d9_msl.o $(BUILD)/obj/v2bridge.o $(BUILD)/obj/kxdata.o \
+              $(BUILD)/obj/beta_exe.o
 KX         := $(ROOT)/data/kkrieger3383.kx
 V2_SRC     := synth_core.cpp ronan.cpp v2mplayer.cpp v2mconv.cpp
 V2_OBJ     := $(patsubst %.cpp,$(BUILD)/v2/%.o,$(V2_SRC))

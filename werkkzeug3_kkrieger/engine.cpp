@@ -2547,6 +2547,8 @@ Engine_::Engine_()
   PaintJobs.Init();
   PaintJobs2.Init();
 
+  DeferLights = sFALSE;
+  DeferredCount = 0;
   StartFrame();
 
 #if !sINTRO
@@ -2655,8 +2657,31 @@ void Engine_::AddPaintJob(KOp *op,const sMatrix &matrix,KEnvironment *kenv,sInt 
   EffectJobs = job;
 }
 
+// 2004 viewports run their scene before they know the camera. the lights
+// are culled against the camera, so they wait until it is set.
+void Engine_::DeferLightJobs()
+{
+  DeferLights = sTRUE;
+  DeferredCount = 0;
+}
+
+void Engine_::FlushLightJobs()
+{
+  DeferLights = sFALSE;
+  for(sInt i=0;i<DeferredCount;i++)
+    AddLightJob(Deferred[i]);
+  DeferredCount = 0;
+}
+
 void Engine_::AddLightJob(const EngLight &light)
 {
+  if(DeferLights)
+  {
+    if(DeferredCount<sCOUNTOF(Deferred))
+      Deferred[DeferredCount++] = light;
+    return;
+  }
+
   // Start with a quick sphere-frustum rejection test
   for(sInt i=0;i<Frustum.NPlanes;i++)
   {

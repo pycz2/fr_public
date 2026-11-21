@@ -1559,21 +1559,74 @@ void KEvent::Stop()
 
 static KClass KClasses[256];
 
-// operators whose parameters changed after the old export format
-// (data/kkrieger3383.kx). new parameters are appended with editor defaults.
+sBool KDocBeta = sFALSE;
+
+// operators whose parameters changed after the old export formats
+// (KUF_3383: data/kkrieger3383.kx, KUF_BETA: the 2004 beta release).
+// new parameters are appended with editor defaults, Fix() converts the rest.
+
+#define KUF_3383  1
+#define KUF_BETA  2
+
 struct KClassUpgrade
 {
   sInt Id;
+  sU32 Formats;
   sU32 OldConvention;
   sU32 NewConvention;
   sInt Count;                     // number of appended data words
   sF32 Float[6];                  // values (if IsFloat bit set)
   sU32 IsFloat;
+  void (*Fix)(KOp *op);           // parameter conversion, after loading
+  sInt Skip;                      // unused bytes after the strings
+  sInt HandlerId;                 // other handler (0: same id)
 };
+
+// 2004 text: 8 parameters, the last byte is not used any more.
+static void FixBetaText(KOp *op)
+{
+  *op->GetEditPtrF(7) = 0.0f;     // internal space
+  *op->GetEditPtrF(8) = 1.0f;     // line feed
+}
+
+// 2004 print: bit 0 centered the text horizontally, now bits 8..9.
+static void FixBetaPrint(KOp *op)
+{
+  sU32 *flags = op->GetEditPtrU(0);
+  if(*flags & 1)
+    *flags = (*flags & ~1) | 0x100;
+}
+
+// 2004 viewport: only the size. It took the camera from the scene, so it
+// runs the scene first (flag 0x80) and uses the game camera (flag 4).
+static void FixBetaViewport(KOp *op)
+{
+  static const sU32 def[24] =
+  {
+    0,0x80|0x04|0x03,0x00000000,              // size, flags, transparent black
+    0,0,0, 0,0,0,                             // rotate, translate
+    0x45800000,0x3e000000,                    // far 4096, near 0.125
+    0,0, 0x3f800000,0x3f800000,               // center, zoom
+    0xff000000,0x45800000,0x41800000,         // fog color, far 4096, near 16
+    0x3c75c28f,0x40000000,                    // eye distance 0.015, focal 2
+    0,0,0x3f800000,0x3f800000,                // window
+  };
+  for(sInt i=1;i<24;i++)
+    *op->GetEditPtrU(i) = def[i];
+}
+
 static const KClassUpgrade KUpgrades[] =
 {
-  { 0x82,0x06000004,0x06000005,1,{ 0 },0x00 },                            // cylinder: arc
-  { 0xf0,0x08000112,0x08000218,6,{ 0.015f,2.0f,0,0,1,1 },0x3f },          // viewport: stereo, window, spline input
+  { 0x82,KUF_3383|KUF_BETA,0x06000004,0x06000005,1,{ 0 },0x00 },          // cylinder: arc
+  { 0xf0,KUF_3383,0x08000112,0x08000218,6,{ 0.015f,2.0f,0,0,1,1 },0x3f }, // viewport: stereo, window, spline input
+  { 0x10,KUF_BETA,0x24000139,0x24800139,0,{ 0 },0 },                       // para: gets the environment
+  { 0x2c,KUF_BETA,0x06000106,0x06000108,2,{ 0 },0 },                       // bitmap rotate: new size
+  { 0x31,KUF_BETA,0x06820108,0x468a0109,1,{ 0 },0,FixBetaText,16 },        // text
+  { 0x11,KUF_BETA,0x3400111a,0x3410121d,3,{ 0 },0 },                       // monster: walk style, weapon, spawn switch
+  { 0x64,KUF_BETA,0x0000100b,0x0000100c,1,{ 0 },0 },                       // particle system: flags
+  { 0x61,KUF_BETA,0x00011005,0x00011006,1,{ 0 },0x01,FixBetaPrint },       // print: radius
+  { 0xf0,KUF_BETA,0x08000101,0x08000218,0,{ 0 },0,FixBetaViewport },       // viewport
+  { 0xe0,KUF_BETA,0x04000f00,0x05000000,0,{ 0 },0,0,0,0xc1 },              // scene for the viewport: scene add
 };
 static const KClassUpgrade *KClassUpgrades[256];
 
@@ -1625,14 +1678,27 @@ void KDoc::Init(const sU8 *&dataPtr)
     SampleSize = *(sU32 *)data; data+=4;
     SampleData = (sU8 *)data; data+=sAlign(SampleSize,4);
   }
-  SongBPM = *(sU32 *)data; data+=4;
-  SongLength = *(sU32 *)data; data+=4;
+  if(KDocBeta)                    // no tempo and no roots. the tempo comes
+  {                               // from the song (v2m header, first tempo)
+    const sU8 *song = SongData;
+    sU32 timediv = *(sU32 *)(song+0);
+    sU32 maxtime = *(sU32 *)(song+4);
+    sU32 gdnum = *(sU32 *)(song+8);
+    sU32 usecs = *(sU32 *)(song+12+3*gdnum);
+    SongBPM = ((60000000+usecs/2)/usecs)<<16;
+    SongLength = (maxtime/timediv)<<16;
+  }
+  else
+  {
+    SongBPM = *(sU32 *)data; data+=4;
+    SongLength = *(sU32 *)data; data+=4;
+  }
   nOps = sReadShort(data);
   nSplines = sReadShort(data);
   for(i=0;i<MAX_OP_ROOT;i++)
-    rootindex[i] = sReadShort(data);  
+    rootindex[i] = KDocBeta ? 0xffff : sReadShort(data);
 
-  Ops.Init(nOps); Ops.Count = nOps;
+  Ops.Init(nOps+1); Ops.Count = nOps;       // +1: demo op for the 2004 data
   Splines.Init(nSplines); Splines.Count = nSplines;
 
   cls = KClasses;
@@ -1651,18 +1717,24 @@ void KDoc::Init(const sU8 *&dataPtr)
     cls->Packing = (sChar *) data;
     while(*data++);
 
+    KClassUpgrades[nClasses] = 0;
+    if(oldFormat)
+    {
+      sU32 format = KDocBeta ? KUF_BETA : KUF_3383;
+      for(sInt u=0;u<sCOUNTOF(KUpgrades);u++)
+        if(KUpgrades[u].Id==i && (KUpgrades[u].Formats&format)
+          && (KUpgrades[u].OldConvention&0x7fffffff)==(conv&0x7fffffff))
+          KClassUpgrades[nClasses] = &KUpgrades[u];
+      if(KClassUpgrades[nClasses] && KClassUpgrades[nClasses]->HandlerId)
+        i = KClassUpgrades[nClasses]->HandlerId;
+    }
+
     KHandler *handler = KHandlers;
     while(handler->Id && handler->Id != i)
       handler++;
 
     if(!handler->Id)
       sFatal("Unknown operator class %02x in class list.",i);
-
-    KClassUpgrades[nClasses] = 0;
-    if(oldFormat)
-      for(sInt u=0;u<sCOUNTOF(KUpgrades);u++)
-        if(KUpgrades[u].Id==i && (KUpgrades[u].OldConvention&0x7fffffff)==(conv&0x7fffffff))
-          KClassUpgrades[nClasses] = &KUpgrades[u];
 
 #if sOP_PERFORMANCE
     sChar buffer[64];
@@ -1719,7 +1791,7 @@ void KDoc::Init(const sU8 *&dataPtr)
   for(i=0;i<nOps;i++)
   {
     op = &Ops[i];
-    for(in=0;in<OPC_GETLINK(op->Convention);in++)
+    for(in=0;in<OPC_GETLINK(KClasses[op->Command].Convention);in++)
     {
       delta = sReadShort(data);
       dest = delta ? &Ops[delta - 1] : 0;
@@ -1774,7 +1846,8 @@ void KDoc::Init(const sU8 *&dataPtr)
           }
         }
 
-        for(j=0;j<OPC_GETSTRING(op->Convention);j++)
+        conv = KClasses[i].Convention;      // what the file has
+        for(j=0;j<OPC_GETSTRING(conv);j++)
         {
           op->SetString(j,(sChar *)data);
           while(*data)
@@ -1782,16 +1855,23 @@ void KDoc::Init(const sU8 *&dataPtr)
           data++;
         }
 
-        for(j=0;j<OPC_GETSPLINE(op->Convention);j++)
+        for(j=0;j<OPC_GETSPLINE(conv);j++)
         {
           k = *((sU16 *) data); data += 2;
           op->SetSpline(j,k ? &Splines[k-1] : 0);
         }
 
-        if(op->Convention&OPC_BLOB)
+        if(conv&OPC_BLOB)
         {
           k = *((sInt *) data); data += 4;
           op->SetBlob(0,k);
+        }
+
+        if(const KClassUpgrade *up = KClassUpgrades[i])
+        {
+          data += up->Skip;
+          if(up->Fix)
+            up->Fix(op);
         }
       }
     }
@@ -1840,8 +1920,11 @@ void KDoc::Init(const sU8 *&dataPtr)
     else
       event->Spline = 0;
 //    event->ReturnMatrix.Init();
-    event->StartInterval = sReadF16(data);
-    event->EndInterval = sReadF16(data);
+    if(!KDocBeta)                 // the 2004 events have no interval
+    {
+      event->StartInterval = sReadF16(data);
+      event->EndInterval = sReadF16(data);
+    }
   }
 
   // read splines
@@ -1876,6 +1959,38 @@ void KDoc::Init(const sU8 *&dataPtr)
       Ops[i].SetBlobData(data);
       data += j;
     }
+  }
+
+  // the 2004 data has one graph, its last operator is the output. the
+  // player wants a demo operator as root, so one is added on top.
+  if(KDocBeta)
+  {
+    static sU8 noAnim[1] = { KA_END };
+    KHandler *handler = KHandlers;
+    while(handler->Id && handler->Id != 0x0d)
+      handler++;
+
+    cls = &KClasses[nClasses];
+    cls->Convention = 0x25000000;
+    cls->Packing = (sChar *)"";
+    cls->InitHandler = handler->InitHandler;
+    cls->ExecHandler = handler->ExecHandler;
+    KClassUpgrades[nClasses] = 0;
+
+    op = &Ops[nOps];
+    sSetMem(op,0,sizeof(KOp));
+    op->Init(cls->Convention);
+    op->Convention = cls->Convention;
+    op->Command = nClasses;
+    op->InitHandler = cls->InitHandler;
+    op->ExecHandler = cls->ExecHandler;
+    op->OpId = nOps;
+    op->SetAnimCode(noAnim,1);
+    op->AddInput(&Ops[nOps-1]);
+    Ops[nOps-1].AddOutput(op);
+    Ops.Count = nOps+1;
+    rootindex[0] = nOps;
+    nOps++;
   }
 
   // distribute anim flag

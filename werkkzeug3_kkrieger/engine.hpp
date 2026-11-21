@@ -243,6 +243,8 @@ public:
   void AddPaintJob(EngMesh *mesh,const sMatrix &matrix,sF32 time,sInt passAdjust=0);
   void AddPaintJob(KOp *op,const sMatrix &matrix,KEnvironment *kenv,sInt passAdjust=0); 
   void AddLightJob(const EngLight &light);
+  void DeferLightJobs();                              // keep lights until the camera is known
+  void FlushLightJobs();                              // add them (after SetViewProject)
 
   void AddAmbientLight(sU32 color);
 
@@ -283,6 +285,9 @@ private:
 
   EngLight *LightJobs;
   sInt LightJobCount;
+  sBool DeferLights;
+  sInt DeferredCount;
+  EngLight Deferred[256];
 
   sMemStack Mem;
   sGrowableMemStack BigMem;

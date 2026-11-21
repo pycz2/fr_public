@@ -1290,12 +1290,13 @@ void KKriegerGame::OnTick(KEnvironment *kenv,sInt slices)
 
   if(Player.FireKey)
   {
-    if(!Player.Ammo[Player.CurrentWeapon/2] && Player.CurrentWeapon!=0)
+    sBool infinite = Player.CurrentWeapon==0 && !KDocBeta;   // 2004: the first weapon counts too
+    if(!Player.Ammo[Player.CurrentWeapon/2] && !infinite)
       PlayerSound(15,0.8f);
 
-    if((Player.Ammo[Player.CurrentWeapon/2]>0 || Player.CurrentWeapon==0) && Player.CurrentWeapon==Player.NextWeapon && Player.CoolTimer<=0 && WeaponTimer>=0.25f)
+    if((Player.Ammo[Player.CurrentWeapon/2]>0 || infinite) && Player.CurrentWeapon==Player.NextWeapon && Player.CoolTimer<=0 && WeaponTimer>=0.25f)
     {
-      if(Player.CurrentWeapon!=0)
+      if(!infinite)
         Player.Ammo[Player.CurrentWeapon/2]--;
       Player.CoolTimer = WeaponCool[Player.CurrentWeapon];
       if(!(WeaponFlags[Player.CurrentWeapon]&KWF_CONTINUOUS))
@@ -3409,7 +3410,8 @@ void __stdcall Exec_KKrieger_Para(KOp *op,KEnvironment *kenv)
   kenv->Game->AccelForwFactor   = df[26];
   kenv->Game->AccelBackFactor   = df[27];
   kenv->Game->JumpForce         = df[28];
-  kenv->Game->PlayerStartPos.Init(df[29],df[30],df[31]);
+  if(!KDocBeta || df[29]!=0 || df[30]!=0 || df[31]!=0)    // 2004: the second para has no start
+    kenv->Game->PlayerStartPos.Init(df[29],df[30],df[31]);
   kenv->Game->DampPlayerCam     = df[56];
 
 
@@ -3453,7 +3455,8 @@ class KObject * __stdcall Init_KKrieger_Para(KOp *op,KEnvironment *kenv)
   sF32 *df;
 
   df = op->GetAnimPtrF(0);
-  kenv->Game->PlayerStartPos.Init(df[29],df[30],df[31]);
+  if(!KDocBeta || df[29]!=0 || df[30]!=0 || df[31]!=0)    // 2004: the second para has no start
+    kenv->Game->PlayerStartPos.Init(df[29],df[30],df[31]);
 
   if(op->GetInput(0))
     return op->GetInput(0)->Cache;

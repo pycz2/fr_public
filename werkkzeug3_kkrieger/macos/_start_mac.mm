@@ -330,7 +330,7 @@ void sSystem_::InitX()
       MacRenderScreenshot(ScreenshotPath);
 
     // the window is paced by the display; tests run at ~60 fps
-    if(Headless && PressEnter)
+    if(Headless && (PressEnter || ScreenshotFrame>=0))
     {
       sInt wait = lastFrameTime + 16 - GetTime();
       if(wait>0) usleep(wait*1000);
@@ -425,8 +425,18 @@ void sSystem_::WaitForKey()
 // player had it inside its executable. a file on the command line wins.
 extern "C" const sU8 KKriegerData[],KKriegerDataEnd[];
 
+sU8 *LoadBetaExe(const sChar *name,sInt &size);   // beta_exe.cpp
+extern sBool KDocBeta;
+
 sU8 *sSystem_::LoadFile(const sChar *name,sInt &size)
 {
+  sInt len = sGetStringLen(name);
+  if(len>4 && strcasecmp(name+len-4,".exe")==0)   // pno0001.exe: the 2004 beta
+  {
+    sU8 *mem = LoadBetaExe(name,size);
+    if(mem) KDocBeta = sTRUE;
+    return mem;
+  }
   if(name[0]==0)
   {
     size = (sInt)(KKriegerDataEnd-KKriegerData);

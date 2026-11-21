@@ -381,6 +381,8 @@ sBool sAppHandler(sInt code,sDInt value)
 #if sLINK_KKRIEGER
     sInt mode;
     mode = Game->GetNewRoot();
+    if(KDocBeta)                  // one graph: if operators pick the scene
+      mode = 0;
 
     if(mode!=Document->CurrentRoot)
     {

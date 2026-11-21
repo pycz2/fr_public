@@ -420,7 +420,7 @@ void __stdcall Exec_Effect_Print(KOp *op,KEnvironment *kenv,sInt flags,sF32 size
             break;
           case 'W':
             val = kenv->Game->Player.Ammo[(kenv->Game->Player.CurrentWeapon/2)&3];
-            if(kenv->Game->Player.CurrentWeapon==0)
+            if(kenv->Game->Player.CurrentWeapon==0 && !KDocBeta)
               inf = 1;
             break;
 #if sPLAYER

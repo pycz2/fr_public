@@ -200,6 +200,18 @@ GenOverlayManagerClass::GenOverlayManagerClass()
     {  4,4,sTF_A8R8G8B8 },
     { 10,9,sTF_A8R8G8B8 },
   };
+  static const sInt sizes2004[GENOVER_RTSIZES][2] =   // 2004 beta data
+  {
+    { 10,9 }, { 9,8 }, { 8,7 }, { 10,9 },
+  };
+  if(KDocBeta)
+  {
+    for(i=0;i<GENOVER_RTSIZES;i++)
+    {
+      sizes[i][0] = sizes2004[i][0];
+      sizes[i][1] = sizes2004[i][1];
+    }
+  }
   static sInt colorcomb[] =
   {
     sMCOA_ADD, sMCOA_SMOOTH, sMCOA_RSUB, sMCOA_SUB,
@@ -955,6 +967,14 @@ void __stdcall Exec_IPP_Viewport(KOp *parent,KEnvironment *kenv,sInt size,sInt f
     {
       Engine->StartFrame();
 
+      // 2004 viewports (flag 0x80): camera operators in the scene set the
+      // game camera, so the scene runs first. lights wait for the camera.
+      if(flags & 0x80)
+      {
+        Engine->DeferLightJobs();
+        op->Exec(kenv);
+      }
+
       // CurrentCam is the way to tell camera details
 
       env.Init();
@@ -1070,7 +1090,10 @@ void __stdcall Exec_IPP_Viewport(KOp *parent,KEnvironment *kenv,sInt size,sInt f
       // set viewport for culling etc.
       Engine->SetViewProject(kenv->CurrentCam);
 
-      op->Exec(kenv);
+      if(flags & 0x80)
+        Engine->FlushLightJobs();
+      else
+        op->Exec(kenv);
 #ifdef _DOPE
       if(!GenOverlayManager->EnableIPP && GenOverlayManager->ForceResolution == 3)
         rt = GenOverlayManager->Alloc(parent,GENOVER_RTSIZES,ocount);

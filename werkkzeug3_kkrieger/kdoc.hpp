@@ -481,6 +481,7 @@ struct KHandler                   // Operator handler
 };
 
 extern KHandler KHandlers[];
+extern sBool KDocBeta;            // data of the 2004 beta release (pno0001.exe)
 
 /****************************************************************************/
 

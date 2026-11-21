@@ -71,7 +71,7 @@ static MTLScissorRect ScissorRect;
 
 static id<MTLRenderPipelineState> ClearPipe[2][2];   // [rendertarget format is back buffer][write color]
 static id<MTLRenderPipelineState> BlitPipe[2];       // [to drawable]
-static id<MTLDepthStencilState> ClearDS[2];          // [write depth+stencil]
+static id<MTLDepthStencilState> ClearDS[3];          // [nothing, depth+stencil, stencil only]
 static id<MTLSamplerState> PointSampler,LinearSampler;
 
 static std::map<std::string,id<MTLLibrary>> Libraries;
@@ -306,6 +306,8 @@ void MacRenderInit(NSView *view,sInt xs,sInt ys)
   dd.frontFaceStencil = sd;
   dd.backFaceStencil = sd;
   ClearDS[1] = [Dev newDepthStencilStateWithDescriptor:dd];
+  dd.depthWriteEnabled = NO;
+  ClearDS[2] = [Dev newDepthStencilStateWithDescriptor:dd];
 
   MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
   smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterNearest;
@@ -540,7 +542,7 @@ static void ClearRect(sU32 flags,sU32 color)
     return;
   SetViewportAndScissor();
   sBool writeColor = (flags & sVCF_COLOR) != 0;
-  sBool writeZ = (flags & (sVCF_Z|sVCF_STENCIL)) != 0;
+  sInt writeZ = (flags & sVCF_Z) ? 1 : (flags & sVCF_STENCIL) ? 2 : 0;   // stencil only keeps the depth
   if(!writeColor && !writeZ)
     return;
   [Enc setRenderPipelineState:ClearPipe[EncTarget<0][writeColor]];

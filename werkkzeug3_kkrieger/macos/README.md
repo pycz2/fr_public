@@ -16,6 +16,16 @@ its data inside the executable. A `.kx` file on the command line is used
 instead. The binary is about 630 KB, or about 500 KB after `strip`, data
 included. Generating the content takes a few seconds at start.
 
+To play the 2004 beta release, give the player its executable:
+
+```
+./build/kkrieger path/to/pno0001.exe
+```
+
+The player unpacks the game data from the executable at start. The data is
+not in this repository: the release terms allow passing the archive around
+only unmodified.
+
 ## Status
 
 - Stage 1: content generation. All 5174 operators of the data are calculated
@@ -26,11 +36,10 @@ included. Generating the content takes a few seconds at start.
 - Stage 3: Metal renderer. The D3D9 shaders of the materials (vs_1_1, ps_1_1)
   are translated to Metal Shading Language at run time.
 - Stage 4: the data is linked into the binary.
+- Stage 5: the data of the 2004 beta release (`pno0001.exe`).
 
-The only data in this repository, `kkrieger3383.kx`, is a development snapshot
-from after the 2004 beta. Its lights are weaker than in the released game, so
-the level looks darker and greyer than videos of the beta. The released beta
-also used an older renderer than these sources.
+`kkrieger3383.kx` is a development snapshot from after the 2004 beta. The beta
+data is an older export of the same game.
 
 Controls: W/A/S/D, mouse, left button, space. The first click in the window
 captures the mouse, switching to another window releases it. Cmd-F toggles
@@ -78,6 +87,40 @@ Options:
   painted at all) and font pages in `Bitmap_Text` (no hud text).
 - Texture handle 0 is reserved. `GenOverlayManager` uses it as a placeholder
   and released the real texture in that slot (the hud font) while it was in use.
+- A stencil-only clear also cleared the depth buffer. After the shadow pass
+  of a light, the following passes (light, texture) failed their depth test,
+  and the level was drawn without textures.
 - Compiler flags: `-fno-delete-null-pointer-checks` (the code tests `this`
   against 0) and `-ffp-contract=off` (x87 had no fused multiply-add, and the
   collision code depends on consistent rounding).
+
+## The 2004 beta data
+
+`beta_exe.cpp` unpacks `pno0001.exe` (an early kkrunchy: a range coder with
+eight adaptive models and LZ matches) and takes the data block out of the
+image. `kdoc.cpp` reads the 2004 export format and converts it to the
+operators of these sources:
+
+- The header has no tempo and no root operators. The tempo comes from the
+  song (89 beats per minute). The data has one graph, in which `If` operators
+  pick intro, menu or game by the game state. The loader puts a `Demo`
+  operator on top of its last operator, and the player keeps that one root.
+- Events have no time interval. The `Text` operator has 16 unused bytes
+  after its strings.
+- Operators with changed parameters: bitmap `Rotate` (new size parameters),
+  `Text`, `Print` (bit 0 centered the text, now bits 8 and 9), `Monster`,
+  `Particle System`, `Viewport`, `Cylinder`, and `KKriegerPara` (now gets the
+  environment). Class `0xe0`, which passed a scene to the viewport, becomes a
+  scene `Add`.
+- A 2004 viewport has only a size. Camera operators in its scene set the
+  camera, so it runs the scene first (flag `0x80`). The engine keeps the
+  lights until the camera is known, because it culls them against the camera.
+  2004 viewports clear to transparent black, and use the 2004 render target
+  sizes.
+- The final blend of the hud honours its "invert alpha" flag.
+- The second `KKriegerPara` operator has no start position, so it does not
+  overwrite the first one. The first weapon counts its ammunition.
+
+The game logic is the later code of these sources, not the 2004 logic.
+Collision, monsters and shots work as in the 3383 data, which is not exactly
+how the beta played.
