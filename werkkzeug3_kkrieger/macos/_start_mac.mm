@@ -7,7 +7,7 @@
 // D3D version), geometry buffers and material setups are implemented here.
 // Drawing is not implemented yet: calls are accepted and counted.
 //
-//   kkrieger file.kx [--fullscreen] [--headless] [--frames n]
+//   kkrieger [file.kx] [--fullscreen] [--headless] [--frames n]
 //                    [--press-enter] [--dump-textures dir]
 
 #import <AppKit/AppKit.h>
@@ -421,15 +421,26 @@ void sSystem_::WaitForKey()
 /***                                                                      ***/
 /****************************************************************************/
 
+// the game data is linked into the binary (kxdata.s), like the original
+// player had it inside its executable. a file on the command line wins.
+extern "C" const sU8 KKriegerData[],KKriegerDataEnd[];
+
 sU8 *sSystem_::LoadFile(const sChar *name,sInt &size)
 {
+  if(name[0]==0)
+  {
+    size = (sInt)(KKriegerDataEnd-KKriegerData);
+    sU8 *mem = new sU8[size];
+    sCopyMem(mem,KKriegerData,size);
+    return mem;
+  }
   return sMacLoadFile(name,size);
 }
 
 sU8 *sSystem_::LoadFile(const sChar *name)
 {
   sInt dummy;
-  return sMacLoadFile(name,dummy);
+  return LoadFile(name,dummy);
 }
 
 /****************************************************************************/

@@ -377,7 +377,7 @@ bool D3D9ToMSL(const unsigned *vs,const unsigned *ps,unsigned texTypes,
       W("  float4 a%d [[attribute(%d)]];\n",inputs[i].slot,inputs[i].slot);
   W("};\n\n");
 
-  W("struct VOut\n{\n  float4 pos [[position]];\n  float4 d0;\n  float4 d1;\n");
+  W("struct VOut\n{\n  float4 pos [[position,invariant]];   // multipass rendering uses zfunc equal\n  float4 d0;\n  float4 d1;\n");
   for(int i=0;i<4;i++) W("  float4 t%d;\n",i);
   W("};\n\n");
 

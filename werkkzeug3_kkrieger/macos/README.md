@@ -8,17 +8,29 @@ It uses only Xcode's clang and the system frameworks. No third-party libraries.
 ```
 cd werkkzeug3_kkrieger/macos
 make
-./build/kkrieger ../data/kkrieger3383.kx
+./build/kkrieger
 ```
+
+`data/kkrieger3383.kx` is linked into the binary, like the original player had
+its data inside the executable. A `.kx` file on the command line is used
+instead. The binary is about 630 KB, or about 500 KB after `strip`, data
+included. Generating the content takes a few seconds at start.
 
 ## Status
 
-- Stage 1: content generation. The player loads `data/kkrieger3383.kx` and builds
-  all textures, meshes, sounds and the level.
+- Stage 1: content generation. All 5174 operators of the data are calculated
+  (1461 of them build bitmaps), which gives all textures, meshes, sounds and
+  the level.
 - Stage 2: window (AppKit), keyboard and mouse, sound (AudioQueue with a small
   mixer for the sound effects).
 - Stage 3: Metal renderer. The D3D9 shaders of the materials (vs_1_1, ps_1_1)
   are translated to Metal Shading Language at run time.
+- Stage 4: the data is linked into the binary.
+
+The only data in this repository, `kkrieger3383.kx`, is a development snapshot
+from after the 2004 beta. Its lights are weaker than in the released game, so
+the level looks darker and greyer than videos of the beta. The released beta
+also used an older renderer than these sources.
 
 Controls: W/A/S/D, mouse, left button, space. The first click in the window
 captures the mouse, switching to another window releases it. Cmd-F toggles

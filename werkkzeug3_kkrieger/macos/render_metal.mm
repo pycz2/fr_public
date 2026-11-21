@@ -1090,7 +1090,15 @@ static id<MTLRenderPipelineState> GetPipeline(sInt fvf)
       return nil;
     }
     NSError *nerr = nil;
-    lib = [Dev newLibraryWithSource:[NSString stringWithUTF8String:msl.c_str()] options:nil error:&nerr];
+    // the passes of a material are drawn with zfunc equal: every shader must
+    // compute exactly the same positions, like D3D9 guaranteed
+    static MTLCompileOptions *opt;
+    if(!opt)
+    {
+      opt = [MTLCompileOptions new];
+      opt.preserveInvariance = YES;
+    }
+    lib = [Dev newLibraryWithSource:[NSString stringWithUTF8String:msl.c_str()] options:opt error:&nerr];
     if(!lib)
     {
       fprintf(stderr,"shader compile failed: %s\n%s\n",nerr.localizedDescription.UTF8String,msl.c_str());
