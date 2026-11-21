@@ -68,7 +68,8 @@ $(BUILD)/obj/%.o: %.mm | $(BUILD)/obj
 	$(CXX) $(PLAYERFLAGS) -fobjc-arc -c $< -o $@
 # game data linked into the binary
 $(BUILD)/obj/kxdata.o: $(KX) | $(BUILD)/obj
-	printf '.section __DATA,__const\n.globl _KKriegerData\n_KKriegerData:\n.incbin "%s"\n.globl _KKriegerDataEnd\n_KKriegerDataEnd:\n' "$(abspath $(KX))" | $(CXX) -x assembler -c - -o $@
+	printf '.section __DATA,__const\n.globl _KKriegerData\n_KKriegerData:\n.incbin "%s"\n.globl _KKriegerDataEnd\n_KKriegerDataEnd:\n' "$(abspath $(KX))" > $(BUILD)/kxdata.s
+	$(CXX) -c $(BUILD)/kxdata.s -o $@
 $(BUILD)/obj/d3d9_msl.o: d3d9_msl.cpp d3d9_msl.hpp | $(BUILD)/obj
 	$(CXX) $(COMMON) -c $< -o $@
 $(BUILD)/obj/v2bridge.o: v2bridge.cpp | $(BUILD)/obj

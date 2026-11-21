@@ -3,6 +3,18 @@
 A native build of the .kkrieger player for macOS (Apple Silicon and Intel).
 It uses only Xcode's clang and the system frameworks. No third-party libraries.
 
+## Download
+
+The [releases page](https://github.com/pycz2/fr_public/releases) has a
+universal binary (Apple Silicon and Intel, macOS 11 or later). It is not
+signed with a developer certificate, so macOS blocks it on the first start.
+Remove the quarantine flag once:
+
+```
+xattr -d com.apple.quarantine kkrieger
+./kkrieger
+```
+
 ## Build and run
 
 ```
@@ -11,9 +23,15 @@ make
 ./build/kkrieger
 ```
 
+A universal binary for both architectures:
+
+```
+make BUILD=build-universal CXX="clang++ -arch arm64 -arch x86_64 -mmacosx-version-min=11.0"
+```
+
 `data/kkrieger3383.kx` is linked into the binary, like the original player had
 its data inside the executable. A `.kx` file on the command line is used
-instead. The binary is about 630 KB, or about 500 KB after `strip`, data
+instead. The arm64 binary is about 630 KB, or about 530 KB after `strip`, data
 included. Generating the content takes a few seconds at start.
 
 To play the 2004 beta release, give the player its executable:

@@ -1,3 +1,35 @@
+# .kkrieger for macOS (Metal)
+
+This fork adds a native macOS port of the .kkrieger player (Apple Silicon and
+Intel) to the Farbrausch source release. Graphics run on Metal, sound on
+AudioToolbox, and the build needs nothing but Xcode's clang and the system
+frameworks. The binary is about 550 KB per architecture, game data included.
+
+It plays two versions of the game:
+
+- `kkrieger3383.kx`, the development snapshot that ships with these sources,
+  linked into the binary;
+- the 2004 beta release (`pno0001.exe` from `kkrieger-beta.zip`). The player
+  unpacks the data from your copy of the executable; the beta itself is not
+  part of this repository.
+
+Download a build from the
+[releases page](https://github.com/pycz2/fr_public/releases), or build it:
+
+```
+cd werkkzeug3_kkrieger/macos
+make
+./build/kkrieger                      # 3383 snapshot
+./build/kkrieger path/to/pno0001.exe  # 2004 beta
+```
+
+Details, controls and the list of changes are in
+[werkkzeug3_kkrieger/macos/README.md](werkkzeug3_kkrieger/macos/README.md).
+
+The original Farbrausch README follows.
+
+---
+
 # Hi!
 
 This is it. Pretty much a history of Farbrausch tools 2001-2011. We've been
