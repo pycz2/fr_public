@@ -8,7 +8,6 @@
 #include "materials/material11vs.hpp"
 #include "materials/material11ps.hpp"
 
-extern sBool KDocBeta;
 
 /****************************************************************************/
 
@@ -549,8 +548,8 @@ sBool sMaterial11::Compile()
     flags = Combiner[i];
     codegenData[i+30] = pssrc13[i];
     codegenData[i+43] = psalpha13[flags & 0x00f];
-    if(KDocBeta && (flags & sMCA_INVERTA))      // honoured for the 2004 data
-      codegenData[i+43] |= XS_COMP;             // (blend of the hud)
+    if(flags & sMCA_INVERTA)                    // was dropped here (only the alpha
+      codegenData[i+43] |= XS_COMP;             // combiner had it): ipp "alpha" merge
   }
 
   // compile vertex shader

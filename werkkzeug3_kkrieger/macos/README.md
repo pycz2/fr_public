@@ -90,6 +90,15 @@ Options:
 - A stencil-only clear also cleared the depth buffer. After the shadow pass
   of a light, the following passes (light, texture) failed their depth test,
   and the level was drawn without textures.
+- Smaller fixes in the shared sources: the light list counted past its four
+  entries and drew a fifth light from outside the array; effects (particles)
+  were sorted between the light passes; `material11.cpp` dropped the
+  "invert alpha" flag of combiner alpha sources (only the ipp "alpha" merge
+  sets it); `Exec_IPP_Select` used an output count its convention does not
+  pass.
+- Sound effects were silent: the effect table stores start positions in
+  samples, the C++ V2 player counts 1000 ticks per second. It now runs with
+  one tick per sample.
 - Compiler flags: `-fno-delete-null-pointer-checks` (the code tests `this`
   against 0) and `-ffp-contract=off` (x87 had no fused multiply-add, and the
   collision code depends on consistent rounding).
@@ -117,10 +126,18 @@ operators of these sources:
   lights until the camera is known, because it culls them against the camera.
   2004 viewports clear to transparent black, and use the 2004 render target
   sizes.
-- The final blend of the hud honours its "invert alpha" flag.
+- 2004 material blend mode 6 was an add (later subtract), modes 7 and 8
+  were the dest alpha and source alpha adds (later 8 and 9).
 - The second `KKriegerPara` operator has no start position, so it does not
   overwrite the first one. The first weapon counts its ammunition.
 
+The ports at https://kznsq.github.io/kkrieger-web/ and
+https://masondye.github.io/kkrieger-wasm/ were used as visual references,
+and their notes for facts about the 2004 data. No code was taken from them.
+
 The game logic is the later code of these sources, not the 2004 logic.
 Collision, monsters and shots work as in the 3383 data, which is not exactly
-how the beta played.
+how the beta played. The renderer is also the later one: the beta lit with
+at most four lights per frame and a shadow mask, and drew specular in a
+separate pass. The title plate of the intro shows as a plain grey surface
+instead of the engraved logo.

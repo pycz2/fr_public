@@ -3084,8 +3084,9 @@ void Engine_::InsertLightJob(const EngLight &light,sF32 importance,sF32 fade)
     LightJobs[i].ZFailCull.ZFailVolume(light.Position,Env.CameraSpace,
       Env.NearClip,&Env.ZoomX,rect);
 
-    // done
-    LightJobCount++;
+    // done (the list holds MAXLIGHT lights, the last one drops out)
+    if(LightJobCount<MAXLIGHT)
+      LightJobCount++;
   }
 }
 
@@ -3207,7 +3208,10 @@ void Engine_::BuildPaintJobs()
       NeedCurrentRender[passIndex] = sTRUE;
     
     PaintJob *pjob = Mem.Alloc<PaintJob>();
-    pjob->SortKey = (passIndex << 24) | (effect->Usage << 16);
+    // like single-pass meshes: after all lights. sorted between the light
+    // passes, the effects got the specular kept in dest alpha added on top.
+    sInt lightId = (effect->Usage < ENGU_SHADOW) ? 0 : MAXLIGHT-1;
+    pjob->SortKey = (passIndex << 24) | (lightId << 20) | (effect->Usage << 16);
     pjob->JobId = -1;
     pjob->Light = 0;
     pjob->EffJob = job;

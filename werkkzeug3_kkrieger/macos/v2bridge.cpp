@@ -90,7 +90,9 @@ void *V2BridgeNew()
     return 0;
   }
   V2Bridge *b = new V2Bridge;
-  b->Player.Init();
+  // the old CV2MPlayer::Play took a position in samples (the sound effect
+  // table stores sample offsets), the C++ player takes ticks: 1 tick = 1 sample
+  b->Player.Init(44100);
   b->Converted = 0;
   return b;
 }

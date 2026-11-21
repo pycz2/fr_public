@@ -1572,8 +1572,10 @@ void __stdcall Exec_IPP_Select(KOp *op,KEnvironment *kenv,sInt count)
 
   op->ExecInputs(kenv);
 
+  // the convention of select has no output count, so 'count' is not passed
+  // (on x86 it was whatever lay on the stack). use the operator's own.
   if(GenOverlayManager->LastOutput)
-    GenOverlayManager->LastOutput->Refs += count - 1;
+    GenOverlayManager->LastOutput->Refs += op->GetOutputCount() - 1;
 }
 
 void __stdcall Exec_IPP_RenderTarget(KOp *op,KEnvironment *kenv)

@@ -1615,6 +1615,17 @@ static void FixBetaViewport(KOp *op)
     *op->GetEditPtrU(i) = def[i];
 }
 
+// 2004 material blend modes (bits 12..15 of the base flags): 6 was an add
+// (later subtract), 7 and 8 were the dest alpha and source alpha adds
+// (later 8 and 9).
+static void FixBetaMaterial(KOp *op)
+{
+  sU32 *flags = op->GetEditPtrU(0);
+  sU32 mode = (*flags >> 12) & 15;
+  static const sU8 map[16] = { 0,1,2,3,4,5,2,8,9,9,10,11,12,13,14,15 };
+  *flags = (*flags & ~0xf000) | (map[mode] << 12);
+}
+
 static const KClassUpgrade KUpgrades[] =
 {
   { 0x82,KUF_3383|KUF_BETA,0x06000004,0x06000005,1,{ 0 },0x00 },          // cylinder: arc
@@ -1626,6 +1637,7 @@ static const KClassUpgrade KUpgrades[] =
   { 0x64,KUF_BETA,0x0000100b,0x0000100c,1,{ 0 },0 },                       // particle system: flags
   { 0x61,KUF_BETA,0x00011005,0x00011006,1,{ 0 },0x01,FixBetaPrint },       // print: radius
   { 0xf0,KUF_BETA,0x08000101,0x08000218,0,{ 0 },0,FixBetaViewport },       // viewport
+  { 0xd0,KUF_BETA,0x26007140,0x26007140,0,{ 0 },0,FixBetaMaterial },       // material: blend modes
   { 0xe0,KUF_BETA,0x04000f00,0x05000000,0,{ 0 },0,0,0,0xc1 },              // scene for the viewport: scene add
 };
 static const KClassUpgrade *KClassUpgrades[256];
