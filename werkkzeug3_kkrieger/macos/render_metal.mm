@@ -417,6 +417,11 @@ static sBool EnsurePass()
   rp.stencilAttachment.loadAction = MTLLoadActionLoad;
   rp.stencilAttachment.storeAction = MTLStoreActionStore;
   Enc = [GetCmd() renderCommandEncoderWithDescriptor:rp];
+  // the projection has its far plane at infinity, and the shadow volumes are
+  // extruded to infinity (w=0): their caps lie exactly on the far plane. with
+  // rounding, parts of them were clipped and the volumes were not closed, so
+  // shadows showed through. clamp the depth there instead of clipping.
+  [Enc setDepthClipMode:MTLDepthClipModeClamp];
   EncTarget = target;
   return sTRUE;
 }

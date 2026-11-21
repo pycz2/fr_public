@@ -53,6 +53,8 @@ Options:
 - `--press-enter`: press Enter every 0.5 s, which walks through intro and menu
   into the game
 - `--dump-textures dir`: write every texture as a TGA file
+- `--script "frame:cmd,..."`: test input. `w+` / `w-` press or release a
+  key, `turn<degrees>` turns the player, `pos` prints the position
 - `--screenshot n file.png`: write the back buffer of frame n (can be given
   several times). Runs with `--headless` step the clock by 1/60 s per frame.
 
@@ -92,6 +94,11 @@ Options:
   the previous draw had set it, so the two-sided stencil counted the faces
   of the shadow volumes the wrong way round now and then. D3D front faces
   are always the clockwise ones.
+- The engine computes the silhouette of a shadow volume for every light, but
+  did not mark the shared index buffer as changed; the D3D version got away
+  with it because its dynamic index buffer was discarded often.
+- The far plane of the projection is at infinity, where the shadow volumes
+  end. The depth is clamped there instead of clipped.
 - A stencil-only clear also cleared the depth buffer. After the shadow pass
   of a light, the following passes (light, texture) failed their depth test,
   and the level was drawn without textures.

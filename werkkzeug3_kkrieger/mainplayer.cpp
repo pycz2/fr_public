@@ -20,6 +20,19 @@ static sInt SoundTimer;
 KDoc *Document;
 KEnvironment *Environment;
 KKriegerGame *Game;
+
+#if sMAC
+#include <stdio.h>
+// test script commands from _start_mac.mm
+void MacGameCommand(const char *cmd)
+{
+  if(!Game) return;
+  if(!strncmp(cmd,"turn",4))
+    Game->PlayerDir += atof(cmd+4)*sPIF/180.0f;
+  else if(!strcmp(cmd,"pos"))
+    fprintf(stderr,"player %.2f %.2f %.2f dir %.1f\n",Game->PlayerPos.x,Game->PlayerPos.y,Game->PlayerPos.z,Game->PlayerDir*180.0f/sPIF);
+}
+#endif
 sF32 GlobalFps;
 
 

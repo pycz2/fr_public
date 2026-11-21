@@ -67,6 +67,8 @@ static sInt ScreenshotFrame[32];             // test: write the back buffer as P
 static const char *ScreenshotPath[32];
 static sInt ScreenshotCount = 0;
 static sInt HeadlessTime = -1;               // headless runs use a fixed 60 Hz clock
+static const char *Script = 0;               // test: "frame:cmd,frame:cmd,..."
+void MacGameCommand(const char *cmd);        // mainplayer.cpp: turn<deg>, pos
 
 /****************************************************************************/
 /***                                                                      ***/
@@ -89,6 +91,8 @@ static void ParseArgs(int argc,char **argv)
       }
       i += 2;
     }
+    else if(!strcmp(argv[i],"--script") && i+1<argc)
+      Script = argv[++i];
     else if(!strcmp(argv[i],"--press-enter"))
       PressEnter = sTRUE;
     else if(!strcmp(argv[i],"--headless"))
@@ -322,6 +326,26 @@ void sSystem_::InitX()
     {
       if(f%30==0)  AddKey(sKEY_ENTER);
       if(f%30==5)  AddKey(sKEY_ENTER|sKEYQ_BREAK);
+    }
+    // test script: <frame>:<cmd> with cmd = key+ / key- (press, release a
+    // key), or a game command (turn<degrees>, pos)
+    for(const char *p=Script;p && *p;)
+    {
+      char cmd[32];
+      sInt frame = atoi(p);
+      const char *c = strchr(p,':');
+      const char *e = strchr(p,',');
+      if(!c) break;
+      sInt n = (sInt)((e ? e : c+strlen(c)) - (c+1));
+      snprintf(cmd,sizeof(cmd),"%.*s",(int)n,c+1);
+      if(frame==f)
+      {
+        if(cmd[0] && (cmd[1]=='+' || cmd[1]=='-') && !cmd[2])
+          AddKey(cmd[0] | (cmd[1]=='-' ? sKEYQ_BREAK : 0));
+        else
+          MacGameCommand(cmd);
+      }
+      p = e ? e+1 : 0;
     }
     for(sInt i=0;i<KeyIndex;i++)
       sAppHandler(sAPPCODE_KEY,KeyBuffer[i]);

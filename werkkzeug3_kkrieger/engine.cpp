@@ -576,6 +576,11 @@ void EngMesh::PaintJob(sInt jobId,GenMaterialPass *pass,const EngPaintInfo &pain
         planes = job->Planes;
 
       UpdateShadowCacheJob(job,planes,svCache,paintInfo);
+      // the silhouette changed, and the geometry is shared by all lights:
+      // upload the new indices. (with d3d the dynamic index buffer was
+      // discarded often enough that this was rarely visible.)
+      if(job->Geometry != sINVALID)
+        sSystem->GeoFlush(job->Geometry,sGEO_INDEX);
       svCache->LightPos = paintInfo.LightPos;
       svCache->LightRange = paintInfo.LightRange;
       svCache->LightId = paintInfo.LightId;
